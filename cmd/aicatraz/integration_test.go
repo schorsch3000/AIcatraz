@@ -9,7 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/creack/pty"
 )
 
 // These tests start real containers (debian:stable-slim and alpine:3 are
@@ -39,9 +43,10 @@ func TestMain(m *testing.M) {
 }
 
 type project struct {
-	t    *testing.T
-	home string // fake host home
-	dir  string // project directory inside it
+	t       *testing.T
+	home    string // fake host home
+	dir     string // project directory inside it
+	runtime string // stands in for $XDG_RUNTIME_DIR (socket paths must stay short)
 }
 
 func newProject(t *testing.T) *project {
@@ -51,6 +56,12 @@ func newProject(t *testing.T) *project {
 	if err := os.MkdirAll(p.dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	rt, err := os.MkdirTemp("", "rt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(rt) })
+	p.runtime = rt
 	return p
 }
 
@@ -84,6 +95,7 @@ func (p *project) run(args ...string) (string, string, int) {
 		"HOME="+p.home,
 		"DOCKER_CONFIG="+realDocker,
 		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"),
+		"XDG_RUNTIME_DIR="+p.runtime,
 	)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -238,4 +250,130 @@ func TestMissingVolumeIsAnError(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(p.dir, ".env")); err == nil {
 		t.Error("the launcher must not create the missing file")
 	}
+}
+
+const proxyRules = `
+volumes:
+  - ~/p:rw
+  - ~/p/.env:hi
+rules:
+  - command: hostname
+    decision: allow
+  - command: uname
+    decision: local
+  - command: cat
+    args: [.env]
+    decision: allow
+  - command: "false"
+    decision: allow
+  - command: rm
+    decision: deny
+`
+
+func (p *project) stateDir() string { return filepath.Join(p.home, ".state", "aicatraz") }
+
+func TestHostCommandsThroughTheBroker(t *testing.T) {
+	p := newProject(t)
+	p.write(".env", "SECRET=1\n")
+	p.write("keep.txt", "x\n")
+	p.write("aicatraz.yaml", proxyRules)
+	hostName, _ := os.Hostname()
+
+	script := `
+echo "host-hostname=$(hostname)"
+echo "container-uname=$(uname -n)"
+echo "jail-sees-env-bytes=$(wc -c < .env)"
+echo "host-cat=$(cat .env)"
+false; echo "false-exit=$?"
+rm keep.txt; echo "rm-exit=$?"
+test -e keep.txt && echo "keep-still-there"
+rm /aicatraz/broker.sock 2>/dev/null && echo "socket-removed" || echo "socket-protected"
+`
+	stdout, stderr, code := p.run("sh", "-c", script)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	for _, want := range []string{
+		"host-hostname=" + hostName, // ran on the host
+		"container-uname=aicatraz-", // `local`: the container's own uname
+		"jail-sees-env-bytes=0",     // the agent can't read the hidden file...
+		"host-cat=SECRET=1",         // ...but an allowed host command can
+		"false-exit=1",              // exit codes pass through
+		"rm-exit=126",               // denied by the policy
+		"keep-still-there",
+		"socket-protected",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("missing %q in output:\n%s", want, stdout)
+		}
+	}
+	if !strings.Contains(stderr, "does not allow") {
+		t.Errorf("the denial message should reach the agent: %q", stderr)
+	}
+
+	// The audit log records what happened, and the session's socket is gone.
+	matches, _ := filepath.Glob(filepath.Join(p.stateDir(), "*", "audit.log"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one audit log, found %v", matches)
+	}
+	audit, _ := os.ReadFile(matches[0])
+	for _, want := range []string{`"name":"hostname"`, `"decision":"allow"`, `"decision":"deny"`, `"decision":"local"`, `"event":"exit"`} {
+		if !strings.Contains(string(audit), want) {
+			t.Errorf("audit log lacks %s:\n%s", want, audit)
+		}
+	}
+	runDirs, _ := filepath.Glob(filepath.Join(p.runtime, "aicatraz", "*"))
+	if len(runDirs) != 0 {
+		t.Errorf("session socket directory not cleaned up: %v", runDirs)
+	}
+}
+
+func TestInteractiveTerminalThroughTheBroker(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\nrules:\n  - command: hostname\n    decision: allow\n  - command: read\n    decision: deny\n")
+	hostName, _ := os.Hostname()
+
+	cmd := exec.Command(bin, "run", "--", "sh", "-c", `read line; echo "got:$line"; hostname`)
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"), "XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptmx.Close()
+
+	var out strings.Builder
+	var mu sync.Mutex
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(buf)
+			mu.Lock()
+			out.Write(buf[:n])
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	ptmx.Write([]byte("abc\n"))
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("timed out")
+	}
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(out.String(), "got:abc") || !strings.Contains(out.String(), hostName) {
+		t.Errorf("output through a terminal: %q", out.String())
+	}
+}
+
+func realHome() string {
+	h, _ := os.UserHomeDir()
+	return h
 }

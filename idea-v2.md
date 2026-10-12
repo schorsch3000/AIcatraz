@@ -105,7 +105,7 @@ Rules the launcher enforces:
 The shim doesn't know what is allowed. Adding a command means adding one symlink in the image.
 
 ### Socket
-- Only the socket file is bind-mounted, not its directory.
+- The socket lives in a private per-session directory under `$XDG_RUNTIME_DIR/aicatraz/<launcher pid>/` (or `/tmp/aicatraz-<uid>/`), because unix socket paths are limited to about 100 bytes. Only the socket file is bind-mounted, read-only, not its directory.
 - The broker checks `SO_PEERCRED` and rejects peers that aren't in the container.
 - The shim reconnects with exponential backoff; broker and shim exchange heartbeats. If the shim vanishes, the broker kills the child process group. If the broker vanishes, the shim exits with a clear error instead of hanging.
 
@@ -159,7 +159,10 @@ rules:
     args: [deploy-test]
     decision: allow                       # runs on the host
 ```
-- `cwd` must `realpath` into a mounted volume.
+- **Argument matching.** `args` is a list of patterns, one per argument. A missing `args` key matches any arguments; `args: []` matches only "no arguments". A *final* `*` matches all remaining arguments (including none); everywhere else `*` is a wildcard inside a single argument and also matches `/`. So `[deploy-test]` is exact, `[push, "*"]` is `git push` with anything after it.
+- **`deny_flags` make the rule not match** (the request then falls through to later rules and finally to the default deny). Matching leans towards "denied" when unsure: `--file`, `--file=x`, abbreviations such as `--fi`, `-f`, `-ffile` and bundled `-nf` all count as `-f`/`--file`. Exact `args` lists are the stronger tool; `deny_flags` is for broad catch-all rules.
+- `cwd` must `realpath` into a mounted volume (not into a hidden one).
+- The binary is looked up on the **broker's** `PATH` (absolute entries only) and a candidate that lives in a writable volume is skipped, so a planted `make` can't be run on the host.
 - Optional `confine_paths: true` rejects any argument that resolves outside the mounted volumes.
 
 ### Dependent files: pinning what a rule really executes
@@ -263,6 +266,7 @@ Append-only file owned by the host user, outside every mounted volume. One JSON 
 ## Known risks, stated plainly
 - **Allowed commands that execute workspace content** are now mitigated by pins, not removed. A change to any pinned file turns the rule into an `ask`; unpinned files a command reaches are still blind spots.
 - **Planted files in the rw workspace** (`.git/hooks`, `.envrc`, `.vscode/tasks.json`, rc files) run when *you* later use the project outside the jail. Mount the dangerous ones `ro`, and review diffs before running anything.
+- **Check-then-run window on the working directory.** The broker resolves and checks `cwd`, then starts the command. In that moment the agent could swap a directory in the workspace for a symlink pointing elsewhere. The command still has to be one the policy allows, and it runs as you in a different directory, so the impact is limited, but it is not zero. Mounting sensitive trees `hi` or `ro` removes the option.
 - **Symlinks in the workspace** are harmless to the container but can mislead host-side tools. Mitigated by `realpath` checks on cwd and `confine_paths`.
 - **Container-visible secrets** (`env.from_host`) can leave over the open network. Keep that list short.
 - **Open network** is intentional. A later option is an egress proxy with a domain allowlist.

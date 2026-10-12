@@ -16,6 +16,10 @@ const (
 	// Paths inside the container.
 	ContainerBinary = "/aicatraz/aicatraz"
 	ContainerBinDir = "/aicatraz/bin"
+	ContainerSocket = "/aicatraz/broker.sock"
+
+	// fallbackPath is used when the image doesn't define PATH.
+	fallbackPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
 
 // defaultShell starts bash when the image has it and sh otherwise.
@@ -37,6 +41,8 @@ type RunInput struct {
 	HostBinary string // this executable, mounted read-only
 	StateDir   string
 	HideIsDir  map[string]bool // hidden path -> is a directory
+	SocketPath string          // the broker's socket on the host, mounted into the container
+	ImagePath  string          // the image's own PATH ("" if it has none)
 }
 
 func PasswdPath(stateDir string) string { return filepath.Join(stateDir, "passwd") }
@@ -86,8 +92,20 @@ func RunArgs(in RunInput) ([]string, error) {
 		"LOGNAME=" + in.UserName,
 	}
 	for _, k := range sortedKeys(cfg.Env.Static) {
+		if k == "PATH" {
+			continue // handled below: the shim directory always comes first
+		}
 		env = append(env, k+"="+cfg.Env.Static[k])
 	}
+	basePath := in.ImagePath
+	if p, ok := cfg.Env.Static["PATH"]; ok {
+		basePath = p
+	}
+	if basePath == "" {
+		basePath = fallbackPath
+	}
+	// The shims shadow the real commands, so a call goes through the broker.
+	env = append(env, "PATH="+ContainerBinDir+":"+basePath)
 	for _, e := range env {
 		args = append(args, "-e", e)
 	}
@@ -105,6 +123,11 @@ func RunArgs(in RunInput) ([]string, error) {
 		return nil, err
 	}
 	args = append(args, mounts...)
+	if in.SocketPath != "" {
+		// Only the socket file is mounted, read-only: the agent can't replace
+		// or unlink it (connecting still works, sockets are exempt from ro).
+		args = append(args, "--mount", bind(in.SocketPath, ContainerSocket, true))
+	}
 	args = append(args,
 		"--mount", bind(in.HostBinary, ContainerBinary, true),
 		"--mount", bind(ShimDir(in.StateDir), ContainerBinDir, true),

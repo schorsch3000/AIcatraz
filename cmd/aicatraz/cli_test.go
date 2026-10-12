@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/schorsch3000/aicatraz/internal/shim"
 )
 
 func write(t *testing.T, content string) string {
@@ -58,8 +61,12 @@ func TestCLIUsageAndMissingFile(t *testing.T) {
 }
 
 func TestDispatch(t *testing.T) {
-	if code := run("make", nil); code != 127 {
-		t.Errorf("shim name should run the shim stub, got %d", code)
+	// Any name other than "aicatraz" is a proxied command: the shim, which
+	// can't find a broker here.
+	shim.SocketPath = filepath.Join(t.TempDir(), "none.sock")
+	shim.DialTimeout = 100 * time.Millisecond
+	if code := run("make", nil); code != shim.ExitUnavailable {
+		t.Errorf("shim name should run the shim, got %d", code)
 	}
 	if code := run("aicatraz", []string{"version"}); code != 0 {
 		t.Errorf("aicatraz name should run the CLI, got %d", code)

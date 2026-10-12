@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/schorsch3000/aicatraz/internal/broker"
 	"github.com/schorsch3000/aicatraz/internal/config"
 )
 
@@ -98,6 +100,11 @@ func Launch(o Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	runBase, err := RunBase()
+	if err != nil {
+		return 0, err
+	}
+	runDir := filepath.Join(runBase, strconv.Itoa(os.Getpid()))
 	in := RunInput{
 		Cfg:        cfg,
 		ID:         id,
@@ -113,6 +120,8 @@ func Launch(o Options) (int, error) {
 		HostBinary: self,
 		StateDir:   state,
 		HideIsDir:  hideIsDir,
+		SocketPath: filepath.Join(runDir, "broker.sock"),
+		ImagePath:  imagePath("docker", img.Ref),
 	}
 	runArgs, err := RunArgs(in)
 	if err != nil {
@@ -143,7 +152,70 @@ func Launch(o Options) (int, error) {
 	if err := WriteShimDir(ShimDir(state), ShimCommands(cfg.Rules)); err != nil {
 		return 0, err
 	}
+
+	// The image is local now (built or pulled), so its PATH can be read.
+	in.ImagePath = imagePath("docker", img.Ref)
+	if runArgs, err = RunArgs(in); err != nil {
+		return 0, err
+	}
+
+	stop, err := startBroker(cfg, state, runBase, runDir, id, uid, o.Stderr)
+	if err != nil {
+		return 0, err
+	}
+	defer stop()
 	return runDocker(runArgs, o)
+}
+
+// startBroker starts this session's broker on a socket in a private
+// directory and returns a function that stops it and removes the socket.
+func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int, stderr io.Writer) (func(), error) {
+	cleanStaleRunDirs(runBase)
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return nil, err
+	}
+	audit, err := broker.OpenAudit(filepath.Join(state, "audit.log"))
+	if err != nil {
+		return nil, err
+	}
+	b, err := broker.New(cfg, broker.Options{
+		UID:     uid,
+		HostEnv: os.Environ(),
+		Session: fmt.Sprintf("%s-%d", id, os.Getpid()),
+		Audit:   audit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	l, err := net.Listen("unix", filepath.Join(runDir, "broker.sock"))
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		if err := b.Serve(l); err != nil {
+			fmt.Fprintf(stderr, "aicatraz: broker stopped: %v\n", err)
+		}
+	}()
+	return func() {
+		b.Close()
+		audit.Close()
+		os.RemoveAll(runDir)
+	}, nil
+}
+
+// cleanStaleRunDirs removes socket directories left behind by launchers that
+// were killed (the directory name is the launcher's PID).
+func cleanStaleRunDirs(dir string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
+			os.RemoveAll(filepath.Join(dir, e.Name()))
+		}
+	}
 }
 
 // writeIdentity generates /etc/passwd and /etc/group for the container: the

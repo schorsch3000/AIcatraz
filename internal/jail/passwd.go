@@ -99,3 +99,17 @@ func withStderr(err error) error {
 	}
 	return err
 }
+
+// imagePath returns the PATH an image defines, or "" if it has none.
+func imagePath(docker, image string) string {
+	out, err := exec.Command(docker, "image", "inspect", "--format", `{{range .Config.Env}}{{println .}}{{end}}`, image).Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, ok := strings.CutPrefix(line, "PATH="); ok {
+			return v
+		}
+	}
+	return ""
+}

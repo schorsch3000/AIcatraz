@@ -3,9 +3,10 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/schorsch3000/aicatraz/internal/shim"
 )
 
 var version = "dev"
@@ -23,7 +24,6 @@ func run(name string, args []string) int {
 	return runShim(name, args)
 }
 
-func runShim(name string, _ []string) int {
-	fmt.Fprintf(os.Stderr, "aicatraz: shim for %q is not implemented yet\n", name)
-	return 127
+func runShim(name string, args []string) int {
+	return shim.Run(name, args, shim.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr})
 }

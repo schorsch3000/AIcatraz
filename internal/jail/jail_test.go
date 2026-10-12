@@ -308,3 +308,51 @@ func TestShellQuote(t *testing.T) {
 		t.Error(got)
 	}
 }
+
+func TestRunBase(t *testing.T) {
+	rt := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", rt)
+	base, err := RunBase()
+	if err != nil || base != filepath.Join(rt, "aicatraz") {
+		t.Fatalf("%q %v", base, err)
+	}
+	if st, _ := os.Stat(base); st.Mode().Perm() != 0o700 {
+		t.Errorf("mode %v", st.Mode().Perm())
+	}
+	if err := os.Chmod(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RunBase(); err == nil {
+		t.Error("a directory others can enter must be refused")
+	}
+	// Without a runtime dir it falls back to a per-user directory under /tmp.
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("TMPDIR", t.TempDir())
+	if base, err := RunBase(); err != nil || !strings.Contains(base, "aicatraz-") {
+		t.Errorf("fallback: %q %v", base, err)
+	}
+}
+
+func TestRunArgsProxyWiring(t *testing.T) {
+	in := testInput(t, "env:\n  static: {PATH: /opt/x/bin}\n")
+	in.SocketPath = "/run/user/1000/aicatraz/7/broker.sock"
+	in.ImagePath = "/usr/local/bin:/usr/bin"
+	args, _ := RunArgs(in)
+	if !has(args, "--mount", "type=bind,source=/run/user/1000/aicatraz/7/broker.sock,target=/aicatraz/broker.sock,readonly") {
+		t.Error("socket must be mounted read-only")
+	}
+	if !has(args, "-e", "PATH=/aicatraz/bin:/opt/x/bin") {
+		t.Errorf("the shim dir must come first and a configured PATH must win: %v", args)
+	}
+	in = testInput(t, "")
+	in.ImagePath = "/usr/local/bin:/usr/bin"
+	args, _ = RunArgs(in)
+	if !has(args, "-e", "PATH=/aicatraz/bin:/usr/local/bin:/usr/bin") {
+		t.Errorf("image PATH must be kept: %v", args)
+	}
+	in.ImagePath = ""
+	args, _ = RunArgs(in)
+	if !has(args, "-e", "PATH=/aicatraz/bin:"+fallbackPath) {
+		t.Errorf("fallback PATH: %v", args)
+	}
+}

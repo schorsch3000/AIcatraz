@@ -30,6 +30,8 @@ Launcher turns a config into a hardened `docker run`.
 **Done when:** inside the container, hidden files read as empty and can't be deleted, `ro` paths reject writes, `~` is empty but `$HOME` is the host path, `capsh --print` shows nothing, `sudo` gains nothing. Works on a Debian base and on at least one image with a different `USER` (and an Alpine one for the static shim binary); a `COPY . /app` Dockerfile with an unexcluded `.env` fails the build step.
 
 ## M2: broker and shim, `allow`/`deny`
+
+*Status: implemented. The broker runs inside `aicatraz run` for the length of the session; `ask` rules are denied with an explanatory message until M3. Covered by broker tests (real socket, shim as a subprocess, pty sessions, signals, group kill) and by Docker integration tests.*
 The first version of the door.
 - Unix socket (only the socket file mounted), `SO_PEERCRED` check, versioned protocol, heartbeat, reconnect with backoff.
 - Shim forwards name, argv, cwd, stdin, env request; broker resolves the binary itself.
