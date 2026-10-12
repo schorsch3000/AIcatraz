@@ -1,0 +1,3 @@
+/bin/
+/dist/
+.pytest_cache/

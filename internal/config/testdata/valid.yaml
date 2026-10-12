@@ -1,0 +1,49 @@
+project:
+  id: myproject
+
+image:
+  dockerfile: Dockerfile.az
+  context: .
+
+volumes:
+  - ~/git/myproject:rw
+  - ~/usr/local/bin/mytool:ro
+  - ~/git/myproject/.env:hi
+
+env:
+  static:
+    EDITOR: vim
+  from_host:
+    - LANG
+
+global:
+  env_strip: [AWS_*, GITHUB_TOKEN]
+
+rules:
+  - command: make
+    args: [build, test]
+    decision: local
+  - command: make
+    args: [deploy-test]
+    decision: allow
+    depends_on: auto
+  - command: make
+    args: ["*"]
+    deny_flags: [-f, --file, -C]
+    decision: ask
+    depends_on: [Makefile, "mk/*.mk"]
+  - command: python
+    args: ["scripts/*.py"]
+    decision: allow
+    depends_on: ["{args[0]}", requirements.txt]
+  - command: git
+    args: [push, "*"]
+    decision: ask
+    env_pass: [SSH_AUTH_SOCK]
+  - command: "*"
+    decision: deny
+
+agent:
+  tool: claude
+  version: latest
+  skip_permissions: true
