@@ -44,6 +44,8 @@ The first version of the door.
 **Done when:** `make deploy-test` runs on the host and its output and exit code come back; `make build` with a `local` rule runs inside the container and never reaches the host; `make -f x deploy-test` is denied; a forged binary path is ignored; `LD_PRELOAD` and `PATH` from the container never reach the command; Ctrl-C works; killing the broker makes the shim exit with an error within the heartbeat timeout; killing the shim kills the child.
 
 ## M3: `ask` and the tmux session
+
+*Status: implemented. Prompts, answers, session grants, timeouts, heartbeats during the wait, withdrawal on interrupt, the `--approval-tty` fallback and `shell` are tested against real containers. The tmux layer (`up`, popup) is tested against a stand-in `tmux` script only, because tmux is not installed on this machine; it needs one run against real tmux. The broker lives inside `aicatraz run` rather than in a pane of its own.*
 - `aicatraz up` creates the tmux session (agent pane plus broker), `aicatraz shell` attaches.
 - `ask` shows a `tmux display-popup` with the full resolved command, cwd, env differences and matched rule.
 - Answers: once, for this session (exact argv, memory only), deny. Timeout means deny. Fallbacks: approval pane and `--approval-tty`.

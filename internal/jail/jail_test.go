@@ -356,3 +356,20 @@ func TestRunArgsProxyWiring(t *testing.T) {
 		t.Errorf("fallback PATH: %v", args)
 	}
 }
+
+func TestIsTerminal(t *testing.T) {
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	if isTerminal(null) {
+		t.Error("/dev/null is a character device but not a terminal")
+	}
+	r, w, _ := os.Pipe()
+	defer r.Close()
+	defer w.Close()
+	if isTerminal(r) {
+		t.Error("a pipe is not a terminal")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -67,6 +68,7 @@ func (v *validator) validate(c *Config) {
 	v.volumes(c)
 	v.env(c)
 	v.limits(c)
+	v.approval(c)
 	v.global(c)
 	v.rules(c)
 	v.agent(c)
@@ -193,6 +195,20 @@ func (v *validator) limits(c *Config) {
 	}
 	if m := c.Limits.Memory; m != "" && !memorySize.MatchString(m) {
 		v.errorf([]any{"limits", "memory"}, "invalid memory size %q (examples: 512m, 2g)", m)
+	}
+}
+
+func (v *validator) approval(c *Config) {
+	t := c.Approval.Timeout
+	if t == "" {
+		return
+	}
+	d, err := time.ParseDuration(t)
+	switch {
+	case err != nil:
+		v.errorf([]any{"approval", "timeout"}, "invalid duration %q (examples: 90s, 2m)", t)
+	case d < 5*time.Second || d > time.Hour:
+		v.errorf([]any{"approval", "timeout"}, "timeout must be between 5s and 1h")
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
 
+	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/policy"
 	"github.com/schorsch3000/aicatraz/internal/proto"
@@ -29,6 +31,11 @@ const (
 	defaultMaxConcurrent = 8
 	maxArgs              = 4096
 	killGrace            = 3 * time.Second
+
+	maxPendingApprovals = 4
+	// The prompt enforces the timeout itself; the broker waits a little longer
+	// so the prompt's own timeout message wins the race.
+	approvalSlack = 2 * time.Second
 )
 
 var commandName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
@@ -40,6 +47,11 @@ type Options struct {
 	Session       string
 	Audit         *Audit
 	MaxConcurrent int
+
+	// Approver is asked about `ask` rules. Nil means approval is unavailable
+	// and such commands are denied.
+	Approver        approve.Approver
+	ApprovalTimeout time.Duration // default 2 minutes
 }
 
 // Broker serves host command requests.
@@ -51,6 +63,10 @@ type Broker struct {
 	hidden   []string // real paths of hidden volumes
 	writable []string // real paths of rw volumes
 	sem      chan struct{}
+	pending  chan struct{} // bounds prompts waiting for the human
+
+	gmu    sync.Mutex
+	grants map[string]bool // "allow for this session" keys
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -68,7 +84,15 @@ func New(cfg *config.Config, opts Options) (*Broker, error) {
 	if opts.MaxConcurrent <= 0 {
 		opts.MaxConcurrent = defaultMaxConcurrent
 	}
-	b := &Broker{pol: pol, cfg: cfg, opts: opts, sem: make(chan struct{}, opts.MaxConcurrent)}
+	if opts.ApprovalTimeout <= 0 {
+		opts.ApprovalTimeout = cfg.Approval.TimeoutOrDefault()
+	}
+	b := &Broker{
+		pol: pol, cfg: cfg, opts: opts,
+		sem:     make(chan struct{}, opts.MaxConcurrent),
+		pending: make(chan struct{}, maxPendingApprovals),
+		grants:  map[string]bool{},
+	}
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 	for _, v := range cfg.Resolved {
 		real, err := filepath.EvalSymlinks(v.Path)
@@ -157,6 +181,12 @@ func (b *Broker) handle(nc net.Conn) {
 	}
 	entry := Entry{Event: "request", PeerPID: int(pid), Name: h.Name, Args: h.Args, Cwd: h.Cwd}
 
+	// One goroutine reads the connection for the whole request, so the
+	// approval wait and the command's I/O both see the same frames.
+	done := make(chan struct{})
+	defer close(done)
+	in := pump(conn, done)
+
 	deny := func(msg string) {
 		entry.Decision, entry.Message = "deny", msg
 		b.audit(entry)
@@ -182,10 +212,7 @@ func (b *Broker) handle(nc net.Conn) {
 		}
 		conn.WriteJSON(proto.TDecision, proto.Decision{Action: proto.ActionLocal})
 		return
-	case policy.Ask:
-		deny("this command needs approval, and the approval flow is not available yet")
-		return
-	case policy.Allow:
+	case policy.Allow, policy.Ask:
 		// handled below
 	default:
 		deny("the policy does not allow this command with these arguments")
@@ -203,6 +230,15 @@ func (b *Broker) handle(nc net.Conn) {
 		return
 	}
 	env, passed := BuildEnv(b.opts.HostEnv, h.Env, d.Config, b.cfg.Global.EnvStrip)
+
+	if d.Action == policy.Ask {
+		ok, by, msg := b.askHuman(conn, in, &h, d, bin, cwd, passed)
+		entry.DecidedBy = by
+		if !ok {
+			deny(msg)
+			return
+		}
+	}
 
 	select {
 	case b.sem <- struct{}{}:
@@ -223,18 +259,18 @@ func (b *Broker) handle(nc net.Conn) {
 	}
 
 	start := time.Now()
-	exit, err := b.execute(conn, &h, bin, cwd, env)
-	done := Entry{Event: "exit", PeerPID: int(pid), Name: h.Name, Args: h.Args, DurationMS: time.Since(start).Milliseconds()}
+	exit, err := b.execute(conn, in, &h, bin, cwd, env)
+	fin := Entry{Event: "exit", PeerPID: int(pid), Name: h.Name, Args: h.Args, DurationMS: time.Since(start).Milliseconds()}
 	if err != nil {
-		done.Message = err.Error()
+		fin.Message = err.Error()
 		code := 127
-		done.ExitCode = &code
+		fin.ExitCode = &code
 		conn.Write(proto.TStderr, []byte("aicatraz: could not start "+h.Name+" on the host: "+err.Error()+"\n"))
 		conn.WriteJSON(proto.TExit, proto.Exit{Code: code})
 	} else {
-		done.ExitCode, done.Signal = &exit.Code, exit.Signal
+		fin.ExitCode, fin.Signal = &exit.Code, exit.Signal
 	}
-	b.audit(done)
+	b.audit(fin)
 }
 
 func (b *Broker) audit(e Entry) error {
@@ -290,7 +326,7 @@ func (b *Broker) checkCwd(cwd string) (string, error) {
 
 // execute runs the command and streams its I/O until it exits or the client
 // goes away.
-func (b *Broker) execute(conn *proto.Conn, h *proto.Hello, bin, dir string, env []string) (proto.Exit, error) {
+func (b *Broker) execute(conn *proto.Conn, in <-chan frame, h *proto.Hello, bin, dir string, env []string) (proto.Exit, error) {
 	cmd := &exec.Cmd{Path: bin, Args: append([]string{h.Name}, h.Args...), Dir: dir, Env: env, WaitDelay: 2 * time.Second}
 
 	var stdin io.WriteCloser
@@ -330,22 +366,21 @@ func (b *Broker) execute(conn *proto.Conn, h *proto.Hello, bin, dir string, env 
 	gone := make(chan struct{}) // the client vanished or timed out
 	go func() {
 		defer close(gone)
-		for {
-			t, p, err := conn.Read()
-			if err != nil {
+		for f := range in {
+			if f.err != nil {
 				return
 			}
-			switch t {
+			switch f.t {
 			case proto.TStdin:
-				_, _ = stdin.Write(p)
+				_, _ = stdin.Write(f.p)
 			case proto.TStdinEOF:
 				_ = stdin.Close()
 			case proto.TSignal:
-				if len(p) == 1 && forwardable(syscall.Signal(p[0])) {
-					killGroup(syscall.Signal(p[0]))
+				if len(f.p) == 1 && forwardable(syscall.Signal(f.p[0])) {
+					killGroup(syscall.Signal(f.p[0]))
 				}
 			case proto.TResize:
-				if rows, cols, ok := proto.ParseResize(p); ok && ptmx != nil {
+				if rows, cols, ok := proto.ParseResize(f.p); ok && ptmx != nil {
 					_ = pty.Setsize(ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 				}
 			case proto.TPing:
@@ -433,4 +468,128 @@ func (w *frameWriter) Write(p []byte) (int, error) {
 
 func copyFrames(c *proto.Conn, t proto.Type, r io.Reader) {
 	_, _ = io.Copy(&frameWriter{c, t}, r)
+}
+
+// frame is one received message, or the error that ended the connection.
+type frame struct {
+	t   proto.Type
+	p   []byte
+	err error
+}
+
+// pump reads the connection until it fails or done is closed. The final
+// frame carries the error.
+func pump(conn *proto.Conn, done <-chan struct{}) <-chan frame {
+	ch := make(chan frame, 16)
+	go func() {
+		defer close(ch)
+		for {
+			t, p, err := conn.Read()
+			f := frame{t: t, p: p, err: err}
+			select {
+			case ch <- f:
+			case <-done:
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return ch
+}
+
+func grantKey(name string, args []string, cwd string) string {
+	return strings.Join(append([]string{name, cwd}, args...), "\x00")
+}
+
+func (b *Broker) granted(key string) bool {
+	b.gmu.Lock()
+	defer b.gmu.Unlock()
+	return b.grants[key]
+}
+
+func (b *Broker) grant(key string) {
+	b.gmu.Lock()
+	defer b.gmu.Unlock()
+	b.grants[key] = true
+}
+
+func ruleText(i int, r *config.Rule) string {
+	if r == nil {
+		return ""
+	}
+	txt := fmt.Sprintf("rules[%d]: %s", i, r.Command)
+	if r.Args != nil {
+		txt += " " + strings.Join(r.Args, " ")
+	}
+	return txt + " (" + r.Decision + ")"
+}
+
+// askHuman handles an `ask` decision. It returns whether the command may run,
+// who decided, and the message for the agent if not. While the human thinks it
+// keeps the connection alive and notices if the agent gives up.
+func (b *Broker) askHuman(conn *proto.Conn, in <-chan frame, h *proto.Hello, d policy.Decision, bin, cwd string, passed []string) (bool, string, string) {
+	key := grantKey(h.Name, h.Args, cwd)
+	if b.granted(key) {
+		return true, "session-grant", ""
+	}
+	if b.opts.Approver == nil {
+		return false, "", "approval is not available: start the session with `aicatraz up` (tmux) or --approval-tty"
+	}
+	select {
+	case b.pending <- struct{}{}:
+		defer func() { <-b.pending }()
+	default:
+		return false, "", "too many approvals are already waiting"
+	}
+
+	req := approve.Request{
+		Name: h.Name, Args: h.Args, Cwd: cwd, Binary: bin, EnvPassed: passed,
+		Rule: d.Rule, RuleText: ruleText(d.Rule, d.Config),
+	}
+	rule := d.Rule
+	b.audit(Entry{Event: "ask", PeerPID: 0, Name: h.Name, Args: h.Args, Cwd: cwd, Rule: &rule, Binary: bin, EnvPassed: passed})
+
+	timeout := b.opts.ApprovalTimeout
+	ctx, cancel := context.WithTimeout(b.ctx, timeout+approvalSlack)
+	defer cancel()
+
+	stopPing := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go conn.KeepAlive(stopPing)
+	go func() {
+		defer close(watcherDone)
+		for {
+			select {
+			case f, ok := <-in:
+				if !ok || f.err != nil {
+					cancel() // the agent's command was interrupted: withdraw the prompt
+					return
+				}
+			case <-stopPing:
+				return
+			}
+		}
+	}()
+	ans, err := b.opts.Approver.Ask(ctx, req, timeout)
+	close(stopPing)
+	<-watcherDone
+
+	switch {
+	case err == nil && ans == approve.AllowOnce:
+		return true, "human", ""
+	case err == nil && ans == approve.AllowSession:
+		b.grant(key)
+		return true, "human", ""
+	case err == nil:
+		return false, "human", "denied by the user"
+	case errors.Is(err, approve.ErrTimeout) || errors.Is(err, context.DeadlineExceeded):
+		return false, "timeout", "nobody answered the approval prompt in time"
+	case errors.Is(err, context.Canceled):
+		return false, "cancelled", "the request was cancelled"
+	case errors.Is(err, approve.ErrUnavailable):
+		return false, "", "approval is not available: " + err.Error()
+	}
+	return false, "", "approval failed: " + err.Error()
 }

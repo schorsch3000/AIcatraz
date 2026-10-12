@@ -215,11 +215,15 @@ New variables are denied by default.
 
 The agent and the approval prompt must be on separate ptys so the agent can't type into or fake a prompt. Approach: **tmux**, driven by the launcher.
 
-- `aicatraz up` starts a tmux session. Pane 1 holds the agent (`docker run -it`). The broker runs as a second process of the session.
-- An `ask` prompt appears as a **`tmux display-popup`** over the agent pane. It is a separate pty owned by the host-side tmux client, so the agent's keystrokes and output can't reach it, and the container has no access to the tmux socket. The agent keeps running underneath.
-- Fallbacks: a dedicated approval pane, or `--approval-tty /dev/pts/N`.
-- Prompt content: the full resolved command (real binary path, argv, cwd, env differences), the matching rule, and the **file-change warning with diff** when a pin differs.
-- Answers: allow once, allow once and re-pin, allow for this session (this exact argv; memory only, never written to the config), deny. Timeout is deny.
+- `aicatraz up` starts a tmux session (`aicatraz-<project>`) whose single pane runs `aicatraz run`; if the session already exists it attaches to it. Inside tmux already, `up` is just `run`. The broker lives inside that `run` process, so there is no separate broker pane. The launcher's environment reaches the pane through a private `0600` file that is deleted on use, never through tmux's command line (it may contain `env.from_host` secrets).
+- An `ask` prompt appears as a **`tmux display-popup`** over the agent's pane. It is a separate pty owned by the host-side tmux client, so the agent's keystrokes and output can't reach it, and the container has no access to the tmux socket. The agent keeps running underneath.
+- `aicatraz shell` opens another shell in the running jail (`docker exec`) from a second terminal. It uses the same broker, so host commands and prompts work there too.
+- Fallback: `--approval-tty /dev/pts/N` shows prompts on a terminal you name. Run something idle there (`sleep infinity`), not a shell that would compete for the keystrokes.
+- With neither, `ask` rules are denied, and the launcher and the denial message say how to fix it.
+- **The prompt is hardened.** Everything in it comes from the agent, so arguments are shown quoted with control characters, escape sequences and non-ASCII turned into visible escapes (an argument can't redraw the prompt or fake a second one); long values are cut and say so. A single key answers it; only `y` and `s` approve, every other key (Enter, Esc, Ctrl-C, ...) is ignored or denies. Keys typed before the prompt appeared are discarded, so type-ahead can't answer it.
+- While waiting, the broker and shim keep exchanging heartbeats. If the agent's command is interrupted, the prompt is withdrawn. At most 4 prompts can wait at once.
+- Prompt content: the full resolved command (real binary path, argv, cwd, passed environment variable names), the matching rule, and the **file-change warning with diff** when a pin differs (M4).
+- Answers: `y` run once, `s` run and allow this exact call (same arguments, same directory) again for the rest of the session (memory only, never written to the config), anything else deny. Timeout is deny. `approval.timeout` in the config sets it (default 2 minutes, 5 seconds to 1 hour). Re-pinning arrives with M4.
 - A built-in multiplexer is a possible later step. tmux is the cheap, robust first version.
 
 ### Execution details

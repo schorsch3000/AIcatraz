@@ -2,6 +2,7 @@ package broker_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/creack/pty"
 
+	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/broker"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/proto"
@@ -28,6 +30,8 @@ import (
 // terminals behave as they would in the container.
 
 func TestMain(m *testing.M) {
+	// Short heartbeat so that tests can show a long approval wait needs pings.
+	proto.Interval, proto.Timeout = 100*time.Millisecond, 600*time.Millisecond
 	if name := os.Getenv("AICATRAZ_TEST_SHIM"); name != "" {
 		shim.SocketPath = os.Getenv("AICATRAZ_TEST_SOCK")
 		shim.BinDir = "/nonexistent"
@@ -202,7 +206,7 @@ func TestDeniedWithoutRule(t *testing.T) {
 	}
 }
 
-func TestAskIsDeniedUntilTheApprovalFlowExists(t *testing.T) {
+func TestAskWithoutAnApproverIsDenied(t *testing.T) {
 	e := setup(t, "rules:\n  - command: echo\n    decision: ask\n")
 	r := e.run("", "echo", "x")
 	if r.code != shim.ExitDenied || !strings.Contains(r.stderr, "approval") {
@@ -662,5 +666,208 @@ func TestTerminalResizeAndCtrlC(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		cmd.Process.Kill()
 		t.Fatalf("Ctrl-C did not reach the command; output %q", out.String())
+	}
+}
+
+// fakeApprover stands in for the human.
+type fakeApprover struct {
+	mu        sync.Mutex
+	answer    approve.Answer
+	err       error
+	delay     time.Duration
+	asked     []approve.Request
+	cancelled bool
+}
+
+func (f *fakeApprover) Ask(ctx context.Context, req approve.Request, timeout time.Duration) (approve.Answer, error) {
+	f.mu.Lock()
+	f.asked = append(f.asked, req)
+	delay, answer, err := f.delay, f.answer, f.err
+	f.mu.Unlock()
+	select {
+	case <-time.After(delay):
+		return answer, err
+	case <-ctx.Done():
+		f.mu.Lock()
+		f.cancelled = true
+		f.mu.Unlock()
+		return approve.Deny, ctx.Err()
+	}
+}
+
+func (f *fakeApprover) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.asked)
+}
+
+func (f *fakeApprover) request(i int) approve.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.asked[i]
+}
+
+func (f *fakeApprover) wasCancelled() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancelled
+}
+
+const askEcho = `
+rules:
+  - command: echo
+    decision: ask
+    env_pass: [FOO]
+  - command: cat
+    decision: ask
+`
+
+func withApprover(a approve.Approver) func(*broker.Options) {
+	return func(o *broker.Options) { o.Approver = a }
+}
+
+func TestAskApprovedOnce(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowOnce}
+	e := setup(t, askEcho, withApprover(f))
+	for i := 0; i < 2; i++ {
+		if r := e.run("", "echo", "hi"); r.code != 0 || r.stdout != "hi\n" {
+			t.Fatalf("run %d: %+v", i, r)
+		}
+	}
+	if f.count() != 2 {
+		t.Errorf("approval once must ask every time, asked %d times", f.count())
+	}
+	req := f.request(0)
+	if req.Name != "echo" || req.Args[0] != "hi" || !strings.HasSuffix(req.Binary, "/echo") || !strings.Contains(req.RuleText, "rules[0]") {
+		t.Errorf("request shown to the human: %+v", req)
+	}
+	var sawAsk, sawHuman bool
+	for _, en := range e.auditEntries() {
+		sawAsk = sawAsk || en.Event == "ask"
+		sawHuman = sawHuman || (en.Event == "request" && en.Decision == "allow" && en.DecidedBy == "human")
+	}
+	if !sawAsk || !sawHuman {
+		t.Errorf("audit lacks ask/human entries: %+v", e.auditEntries())
+	}
+}
+
+func TestAskSessionGrantCoversTheExactCallOnly(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowSession}
+	e := setup(t, askEcho, withApprover(f))
+	e.run("", "echo", "a")
+	e.run("", "echo", "a") // same call: no prompt
+	if f.count() != 1 {
+		t.Fatalf("asked %d times, want 1", f.count())
+	}
+	e.run("", "echo", "b") // different arguments: prompt again
+	if f.count() != 2 {
+		t.Errorf("asked %d times, want 2", f.count())
+	}
+	var grants int
+	for _, en := range e.auditEntries() {
+		if en.DecidedBy == "session-grant" {
+			grants++
+		}
+	}
+	if grants != 1 {
+		t.Errorf("session-grant entries: %d", grants)
+	}
+}
+
+func TestAskDeniedByTheUser(t *testing.T) {
+	f := &fakeApprover{answer: approve.Deny}
+	e := setup(t, askEcho, withApprover(f))
+	r := e.run("", "echo", "x")
+	if r.code != shim.ExitDenied || !strings.Contains(r.stderr, "denied by the user") || r.stdout != "" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAskTimeoutAndUnavailable(t *testing.T) {
+	e := setup(t, askEcho, withApprover(&fakeApprover{err: approve.ErrTimeout}))
+	r := e.run("", "echo", "x")
+	if r.code != shim.ExitDenied || !strings.Contains(r.stderr, "in time") {
+		t.Fatalf("timeout: %+v", r)
+	}
+	var by string
+	for _, en := range e.auditEntries() {
+		if en.Event == "request" {
+			by = en.DecidedBy
+		}
+	}
+	if by != "timeout" {
+		t.Errorf("decided_by %q", by)
+	}
+
+	e = setup(t, askEcho, withApprover(&fakeApprover{err: fmt.Errorf("%w: no tmux", approve.ErrUnavailable)}))
+	if r := e.run("", "echo", "x"); r.code != shim.ExitDenied || !strings.Contains(r.stderr, "not available") {
+		t.Fatalf("unavailable: %+v", r)
+	}
+}
+
+func TestAskLongWaitKeepsTheShimAlive(t *testing.T) {
+	// The heartbeat timeout is 600ms in these tests; the human takes 2s.
+	f := &fakeApprover{answer: approve.AllowOnce, delay: 2 * time.Second}
+	e := setup(t, askEcho, withApprover(f))
+	r := e.run("", "echo", "patient")
+	if r.code != 0 || r.stdout != "patient\n" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAskWithdrawnWhenTheAgentGivesUp(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowOnce, delay: 30 * time.Second}
+	e := setup(t, askEcho, withApprover(f))
+	shimc := e.shimCmd("echo", "never")
+	if err := shimc.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "prompt", func() bool { return f.count() == 1 })
+	shimc.Process.Kill() // Ctrl-C / the agent abandons the call
+	shimc.Wait()
+	waitFor(t, "prompt to be withdrawn", f.wasCancelled)
+}
+
+func TestAskStdinStillWorksAfterApproval(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowOnce, delay: 300 * time.Millisecond}
+	e := setup(t, askEcho, withApprover(f))
+	big := strings.Repeat("x", 200000)
+	if r := e.run(big, "cat"); r.code != 0 || r.stdout != big {
+		t.Fatalf("code %d, %d bytes back", r.code, len(r.stdout))
+	}
+}
+
+func TestTooManyPendingApprovals(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowOnce, delay: time.Minute}
+	e := setup(t, askEcho, withApprover(f))
+	var procs []*exec.Cmd
+	for i := 0; i < 4; i++ {
+		c := e.shimCmd("echo", fmt.Sprint(i))
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		procs = append(procs, c)
+	}
+	defer func() {
+		for _, c := range procs {
+			c.Process.Kill()
+			c.Wait()
+		}
+	}()
+	waitFor(t, "four prompts", func() bool { return f.count() == 4 })
+	r := e.run("", "echo", "fifth")
+	if r.code != shim.ExitDenied || !strings.Contains(r.stderr, "too many approvals") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAskPassesOnlyNamedEnvToTheHuman(t *testing.T) {
+	f := &fakeApprover{answer: approve.Deny}
+	e := setup(t, askEcho, withApprover(f))
+	cmd := e.shimCmd("echo", "x")
+	cmd.Env = append(cmd.Env, "FOO=1", "BAR=2")
+	cmd.Run()
+	if got := f.request(0).EnvPassed; len(got) != 1 || got[0] != "FOO" {
+		t.Errorf("env shown for approval: %v", got)
 	}
 }

@@ -3,20 +3,22 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config is the parsed configuration file.
 type Config struct {
-	Project Project   `yaml:"project"`
-	Image   ImageSpec `yaml:"image"`
-	Volumes []string  `yaml:"volumes"`
-	Env     Env       `yaml:"env"`
-	Limits  Limits    `yaml:"limits"`
-	Global  Global    `yaml:"global"`
-	Rules   []Rule    `yaml:"rules"`
-	Agent   Agent     `yaml:"agent"`
+	Project  Project   `yaml:"project"`
+	Image    ImageSpec `yaml:"image"`
+	Volumes  []string  `yaml:"volumes"`
+	Env      Env       `yaml:"env"`
+	Limits   Limits    `yaml:"limits"`
+	Approval Approval  `yaml:"approval"`
+	Global   Global    `yaml:"global"`
+	Rules    []Rule    `yaml:"rules"`
+	Agent    Agent     `yaml:"agent"`
 
 	// Resolved is filled in by validation: volumes with ~ expanded and the mode parsed.
 	Resolved []Volume `yaml:"-"`
@@ -57,6 +59,26 @@ func (i *ImageSpec) UnmarshalYAML(n *yaml.Node) error {
 		return nil
 	}
 	return fmt.Errorf("line %d: image must be a string or a mapping", n.Line)
+}
+
+// Approval tunes the approval prompt for `ask` rules.
+type Approval struct {
+	Timeout string `yaml:"timeout"` // a Go duration such as "90s" or "2m"; default 2m
+}
+
+// DefaultApprovalTimeout is how long a prompt waits before it counts as a deny.
+const DefaultApprovalTimeout = 2 * time.Minute
+
+// TimeoutOrDefault returns the prompt timeout. Validation guarantees it parses.
+func (a Approval) TimeoutOrDefault() time.Duration {
+	if a.Timeout == "" {
+		return DefaultApprovalTimeout
+	}
+	d, err := time.ParseDuration(a.Timeout)
+	if err != nil || d <= 0 {
+		return DefaultApprovalTimeout
+	}
+	return d
 }
 
 // Limits caps the container's resources. Zero values mean the default

@@ -377,3 +377,212 @@ func realHome() string {
 	h, _ := os.UserHomeDir()
 	return h
 }
+
+// approvalTerminal is a pty the test plays the human on. Prompts are written
+// to the slave side's path; the test reads them from, and answers on, master.
+type approvalTerminal struct {
+	t      *testing.T
+	master *os.File
+	slave  *os.File
+	mu     sync.Mutex
+	out    strings.Builder
+}
+
+func newApprovalTerminal(t *testing.T) *approvalTerminal {
+	t.Helper()
+	m, s, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &approvalTerminal{t: t, master: m, slave: s}
+	t.Cleanup(func() { m.Close(); s.Close() })
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := m.Read(buf)
+			a.mu.Lock()
+			a.out.Write(buf[:n])
+			a.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return a
+}
+
+func (a *approvalTerminal) text() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.out.String()
+}
+
+// answerWhenAsked waits for the n-th prompt and types key.
+func (a *approvalTerminal) answerWhenAsked(n int, key string) {
+	a.t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for strings.Count(a.text(), "[n] deny") < n {
+		if time.Now().After(deadline) {
+			a.t.Fatalf("prompt %d never appeared; terminal shows %q", n, a.text())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(150 * time.Millisecond) // the prompt switches the terminal to raw mode
+	a.master.Write([]byte(key))
+}
+
+func (p *project) runWithApproval(tty string, args ...string) (string, string, int) {
+	p.t.Helper()
+	cmd := exec.Command(bin, append([]string{"run", "--approval-tty", tty, "--"}, args...)...)
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
+		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		p.t.Fatal(err)
+	}
+	return out.String(), errb.String(), code
+}
+
+const askRules = `
+volumes:
+  - ~/p:rw
+approval:
+  timeout: 5s
+rules:
+  - command: hostname
+    decision: ask
+`
+
+func TestAskPromptsOnTheApprovalTerminal(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", askRules)
+	hostName, _ := os.Hostname()
+	term := newApprovalTerminal(t)
+
+	// Approved once: the command runs on the host, and the prompt showed what it is.
+	go term.answerWhenAsked(1, "y")
+	stdout, stderr, code := p.runWithApproval(term.slave.Name(), "sh", "-c", "hostname")
+	if code != 0 || strings.TrimSpace(stdout) != hostName {
+		t.Fatalf("approved: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	shown := term.text()
+	for _, want := range []string{`"hostname"`, "ON THE HOST", "/hostname", "rules[0]"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, shown)
+		}
+	}
+	// The agent's own output never contained the prompt.
+	if strings.Contains(stdout+stderr, "ON THE HOST") {
+		t.Error("the prompt leaked into the agent's terminal")
+	}
+
+	// Denied: exit 126 and the message reaches the agent.
+	go term.answerWhenAsked(2, "n")
+	stdout, stderr, code = p.runWithApproval(term.slave.Name(), "sh", "-c", "hostname")
+	if code != 126 || !strings.Contains(stderr, "denied by the user") || stdout != "" {
+		t.Errorf("denied: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+
+	// Allow for the session: asked once for two identical calls.
+	go term.answerWhenAsked(3, "s")
+	stdout, stderr, code = p.runWithApproval(term.slave.Name(), "sh", "-c", "hostname; hostname")
+	if code != 0 || strings.Count(stdout, hostName) != 2 {
+		t.Errorf("session grant: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if n := strings.Count(term.text(), "[n] deny"); n != 3 {
+		t.Errorf("expected 3 prompts in total, saw %d", n)
+	}
+}
+
+func TestAskTimesOutToDeny(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", askRules)
+	term := newApprovalTerminal(t)
+	start := time.Now()
+	stdout, stderr, code := p.runWithApproval(term.slave.Name(), "sh", "-c", "hostname")
+	if code != 126 || !strings.Contains(stderr, "in time") || stdout != "" {
+		t.Errorf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if time.Since(start) > 40*time.Second {
+		t.Errorf("took %v", time.Since(start))
+	}
+}
+
+func TestAskWithoutApprovalTerminalIsDeniedWithAHint(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", askRules)
+	stdout, stderr, code := p.run("sh", "-c", "hostname")
+	if code != 126 || stdout != "" || !strings.Contains(stderr, "aicatraz up") {
+		t.Errorf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+}
+
+func TestSecondShellUsesTheSameBroker(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\nrules:\n  - command: hostname\n    decision: allow\n")
+	hostName, _ := os.Hostname()
+
+	env := append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
+		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
+	first := exec.Command(bin, "run", "--", "sleep", "30")
+	first.Dir, first.Env = p.dir, env
+	var firstErr bytes.Buffer
+	first.Stderr = &firstErr
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { first.Process.Kill(); first.Wait() }()
+
+	var out, errb []byte
+	var err error
+	for i := 0; i < 100; i++ { // wait for the container to exist
+		second := exec.Command(bin, "shell", "--", "hostname")
+		second.Dir, second.Env = p.dir, env
+		out, err = second.Output()
+		if err == nil {
+			break
+		}
+		if ee, ok := err.(*exec.ExitError); ok {
+			errb = ee.Stderr
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if err != nil || strings.TrimSpace(string(out)) != hostName {
+		t.Fatalf("second shell: %v %q %q\nfirst jail stderr: %s", err, out, errb, firstErr.String())
+	}
+	// Without a running jail the command explains itself.
+	first.Process.Kill()
+	first.Wait()
+}
+
+func TestUpPrintsTheTmuxCommand(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "project: {id: demo}\nvolumes:\n  - ~/p:rw\n")
+	// A stand-in tmux: no session exists, so `up` must create one.
+	fake := t.TempDir()
+	os.WriteFile(filepath.Join(fake, "tmux"), []byte("#!/bin/sh\n[ \"$1\" = has-session ] && exit 1\nexit 0\n"), 0o755)
+
+	cmd := exec.Command(bin, "up", "--print", "--", "claude")
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "PATH="+fake+":"+os.Getenv("PATH"), "TMUX=", "XDG_RUNTIME_DIR="+p.runtime, "HOME="+p.home)
+	cmd.Env = append(cmd.Env, "MY_SECRET_TOKEN=hunter2")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	line := string(out)
+	for _, want := range []string{"new-session -s aicatraz-demo", "__with-env", "run -c " + filepath.Join(p.dir, "aicatraz.yaml"), "-- claude"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("missing %q in %s", want, line)
+		}
+	}
+	if strings.Contains(line, "hunter2") {
+		t.Error("environment leaked into the tmux command line")
+	}
+}

@@ -78,8 +78,14 @@ func Run(name string, args []string, std IO) int {
 		return ExitUnavailable
 	}
 
-	var dec proto.Decision
-	if err := conn.ReadJSON(proto.TDecision, &dec); err != nil {
+	// A command that needs approval can wait a long time for the human, so keep
+	// the connection alive (and notice if the broker dies) while waiting.
+	stopPing := make(chan struct{})
+	defer close(stopPing)
+	go conn.KeepAlive(stopPing)
+
+	dec, err := awaitDecision(conn)
+	if err != nil {
 		fmt.Fprintf(std.Stderr, "aicatraz: no answer from the broker: %v\n", err)
 		return ExitLost
 	}
@@ -94,6 +100,25 @@ func Run(name string, args []string, std IO) int {
 	}
 	fmt.Fprintf(std.Stderr, "aicatraz: unknown decision %q\n", dec.Action)
 	return ExitLost
+}
+
+// awaitDecision reads frames until the broker's decision, skipping heartbeats.
+func awaitDecision(conn *proto.Conn) (proto.Decision, error) {
+	for {
+		t, p, err := conn.Read()
+		if err != nil {
+			return proto.Decision{}, err
+		}
+		switch t {
+		case proto.TPing:
+		case proto.TDecision:
+			var d proto.Decision
+			err := json.Unmarshal(p, &d)
+			return d, err
+		default:
+			return proto.Decision{}, fmt.Errorf("unexpected frame %q", t)
+		}
+	}
 }
 
 func isTerminalWriter(w io.Writer) bool {
@@ -130,7 +155,6 @@ func stream(conn *proto.Conn, std IO, tty bool) int {
 
 	stop := make(chan struct{})
 	defer close(stop)
-	go conn.KeepAlive(stop)
 
 	sigs := make(chan os.Signal, 8)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH)

@@ -12,7 +12,7 @@ import (
 type Entry struct {
 	Time       time.Time `json:"time"`
 	Session    string    `json:"session,omitempty"`
-	Event      string    `json:"event"` // "request" or "exit"
+	Event      string    `json:"event"` // "request", "ask" or "exit"
 	PeerPID    int       `json:"peer_pid,omitempty"`
 	Name       string    `json:"name,omitempty"`
 	Args       []string  `json:"args,omitempty"`
@@ -20,6 +20,7 @@ type Entry struct {
 	Rule       *int      `json:"rule,omitempty"` // index of the matching rule; absent if none matched
 	Decision   string    `json:"decision,omitempty"`
 	Message    string    `json:"message,omitempty"`
+	DecidedBy  string    `json:"decided_by,omitempty"` // "human", "session-grant", "timeout", "cancelled"
 	Binary     string    `json:"binary,omitempty"`
 	EnvPassed  []string  `json:"env_passed,omitempty"`
 	ExitCode   *int      `json:"exit_code,omitempty"`

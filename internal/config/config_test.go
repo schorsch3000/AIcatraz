@@ -91,6 +91,8 @@ func TestProblems(t *testing.T) {
 		{"comma in path", "volumes:\n  - ~/a,b:rw\n", 2, Error, "commas"},
 		{"bad memory", "limits:\n  memory: lots\n", 2, Error, "invalid memory"},
 		{"negative pids", "limits:\n  pids: -1\n", 2, Error, "negative"},
+		{"bad approval timeout", "approval:\n  timeout: soon\n", 2, Error, "invalid duration"},
+		{"approval timeout too short", "approval:\n  timeout: 1s\n", 2, Error, "between"},
 		{"bad project id", "project:\n  id: \"a b\"\n", 2, Error, "invalid project id"},
 		{"static and from_host", "env:\n  static: {A: b}\n  from_host: [A]\n", 3, Error, "both"},
 		{"secret from_host", "env:\n  from_host: [GITHUB_TOKEN]\n", 2, Warning, "looks like a secret"},
@@ -156,5 +158,16 @@ func TestEmptyFile(t *testing.T) {
 	cfg, ps := Parse([]byte(""), opts)
 	if cfg == nil || len(ps) != 0 {
 		t.Fatalf("empty config should be valid: %+v", ps)
+	}
+}
+
+func TestApprovalTimeout(t *testing.T) {
+	cfg, ps := Parse([]byte("approval:\n  timeout: 90s\n"), opts)
+	if len(ps) != 0 || cfg.Approval.TimeoutOrDefault().Seconds() != 90 {
+		t.Fatalf("%+v %v", ps, cfg.Approval.TimeoutOrDefault())
+	}
+	cfg, _ = Parse([]byte(""), opts)
+	if cfg.Approval.TimeoutOrDefault() != DefaultApprovalTimeout {
+		t.Error("default")
 	}
 }

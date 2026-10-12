@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"time"
 
+	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/jail"
 )
@@ -12,9 +15,15 @@ import (
 const defaultConfig = "aicatraz.yaml"
 
 const usage = `usage:
-  aicatraz run [-c file] [--print] [-- command...]
-                                 start the jail (default: an interactive shell);
-                                 --print shows the docker commands and changes nothing
+  aicatraz up [-c file] [--print] [--approval-tty dev] [-- command...]
+                                 start the jail in a tmux session (prompts for 'ask'
+                                 rules appear as popups); attaches if it already runs
+  aicatraz run [-c file] [--print] [--approval-tty dev] [-- command...]
+                                 start the jail in this terminal (default: an
+                                 interactive shell); --print shows the docker
+                                 commands and changes nothing
+  aicatraz shell [-c file] [-- command...]
+                                 open another shell in the running jail
   aicatraz config check [file]   validate a config (default: ` + defaultConfig + `)
   aicatraz version
 `
@@ -32,8 +41,25 @@ func cli(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version":
 		fmt.Fprintln(stdout, "aicatraz", version)
 		return 0
-	case "run":
-		return runJail(args[1:], stdout, stderr)
+	case "run", "up", "shell":
+		return launch(args[0], args[1:], stdout, stderr)
+	case approve.PromptCommand: // used inside the tmux popup
+		if len(args) == 4 {
+			secs, err := strconv.Atoi(args[3])
+			if err == nil {
+				return approve.RunPrompt(args[1], args[2], time.Duration(secs)*time.Second)
+			}
+		}
+		return 2
+	case jail.UpEnvCommand: // used inside the tmux session: restore the saved environment, then run
+		if len(args) < 3 {
+			return 2
+		}
+		if err := jail.RestoreEnv(args[1]); err != nil {
+			fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+			return 2
+		}
+		return cli(args[2:], stdout, stderr)
 	case "config":
 		if len(args) >= 2 && args[1] == "check" && len(args) <= 3 {
 			file := defaultConfig
@@ -66,7 +92,7 @@ func configCheck(file string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runJail(args []string, stdout, stderr io.Writer) int {
+func launch(verb string, args []string, stdout, stderr io.Writer) int {
 	opts := jail.Options{ConfigPath: defaultConfig, Stdout: stdout, Stderr: stderr}
 	for len(args) > 0 {
 		switch a := args[0]; {
@@ -76,19 +102,29 @@ func runJail(args []string, stdout, stderr io.Writer) int {
 		case a == "--print":
 			opts.Print = true
 			args = args[1:]
-		case a == "-c" || a == "--config":
-			if len(args) < 2 {
-				fmt.Fprint(stderr, usage)
-				return 2
-			}
+		case (a == "-c" || a == "--config") && len(args) >= 2:
 			opts.ConfigPath = args[1]
+			args = args[2:]
+		case a == "--approval-tty" && len(args) >= 2 && verb != "shell":
+			opts.ApprovalTTY = args[1]
 			args = args[2:]
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
 	}
-	code, err := jail.Launch(opts)
+	var (
+		code int
+		err  error
+	)
+	switch verb {
+	case "up":
+		code, err = jail.Up(opts)
+	case "shell":
+		code, err = jail.Shell(opts)
+	default:
+		code, err = jail.Launch(opts)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "aicatraz: %v\n", err)
 		return 2

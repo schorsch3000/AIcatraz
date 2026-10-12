@@ -15,17 +15,21 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/term"
+
+	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/broker"
 	"github.com/schorsch3000/aicatraz/internal/config"
 )
 
 // Options for Launch.
 type Options struct {
-	ConfigPath string
-	Command    []string // run this instead of an interactive shell
-	Print      bool     // show what would run, change nothing
-	Stdout     io.Writer
-	Stderr     io.Writer
+	ConfigPath  string
+	Command     []string // run this instead of an interactive shell
+	Print       bool     // show what would run, change nothing
+	ApprovalTTY string   // prompt for `ask` rules on this terminal device instead of tmux
+	Stdout      io.Writer
+	Stderr      io.Writer
 }
 
 // Launch builds the image if needed and runs the jail. It returns the exit
@@ -159,7 +163,7 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 
-	stop, err := startBroker(cfg, state, runBase, runDir, id, uid, o.Stderr)
+	stop, err := startBroker(cfg, state, runBase, runDir, id, uid, chooseApprover(cfg, o, runDir), o.Stderr)
 	if err != nil {
 		return 0, err
 	}
@@ -169,7 +173,7 @@ func Launch(o Options) (int, error) {
 
 // startBroker starts this session's broker on a socket in a private
 // directory and returns a function that stops it and removes the socket.
-func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int, stderr io.Writer) (func(), error) {
+func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int, approver approve.Approver, stderr io.Writer) (func(), error) {
 	cleanStaleRunDirs(runBase)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return nil, err
@@ -179,10 +183,11 @@ func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int,
 		return nil, err
 	}
 	b, err := broker.New(cfg, broker.Options{
-		UID:     uid,
-		HostEnv: os.Environ(),
-		Session: fmt.Sprintf("%s-%d", id, os.Getpid()),
-		Audit:   audit,
+		UID:      uid,
+		HostEnv:  os.Environ(),
+		Session:  fmt.Sprintf("%s-%d", id, os.Getpid()),
+		Audit:    audit,
+		Approver: approver,
 	})
 	if err != nil {
 		return nil, err
@@ -284,9 +289,10 @@ func runDocker(args []string, o Options) (int, error) {
 	return 0, err
 }
 
+// isTerminal asks the kernel. Checking for a character device is not enough:
+// /dev/null is one, and passing -t to docker with it as stdin fails.
 func isTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // dynamicBinary reports whether path is an ELF executable that needs a dynamic loader.
@@ -313,4 +319,35 @@ func shellQuote(s string) string {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// chooseApprover picks where `ask` prompts appear: an explicit terminal, else a
+// tmux popup if the launcher itself runs inside tmux, else nowhere (and `ask`
+// rules are denied). It says which, so the user isn't surprised later.
+func chooseApprover(cfg *config.Config, o Options, runDir string) approve.Approver {
+	hasAsk := false
+	for _, r := range cfg.Rules {
+		hasAsk = hasAsk || r.Decision == "ask"
+	}
+	say := func(format string, a ...any) {
+		if hasAsk {
+			fmt.Fprintf(o.Stderr, "aicatraz: "+format+"\n", a...)
+		}
+	}
+
+	if o.ApprovalTTY != "" {
+		say("approvals are shown on %s", o.ApprovalTTY)
+		return &approve.TTY{Path: o.ApprovalTTY}
+	}
+	pane := os.Getenv("TMUX_PANE")
+	if os.Getenv("TMUX") != "" && pane != "" {
+		tmux, err := exec.LookPath("tmux")
+		self, err2 := os.Executable()
+		if err == nil && err2 == nil {
+			say("approvals are shown as a tmux popup")
+			return &approve.Tmux{Tmux: tmux, Pane: pane, Self: self, Dir: runDir}
+		}
+	}
+	say("no approval terminal: `ask` rules will be denied (start with `aicatraz up` inside tmux, or pass --approval-tty)")
+	return nil
 }
