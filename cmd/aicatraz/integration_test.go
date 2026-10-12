@@ -47,6 +47,9 @@ type project struct {
 	home    string // fake host home
 	dir     string // project directory inside it
 	runtime string // stands in for $XDG_RUNTIME_DIR (socket paths must stay short)
+	// reviewBuild makes run/runWithApproval leave build files for the launcher
+	// to check (by default tests pass --approve-build, since they test other things).
+	reviewBuild bool
 }
 
 func newProject(t *testing.T) *project {
@@ -70,6 +73,16 @@ func (p *project) removeImage(id string) {
 	p.t.Cleanup(func() { exec.Command("docker", "rmi", "-f", "aicatraz/"+id+":latest").Run() })
 }
 
+// runArgs is `run [flags] --` as the tests call it.
+func (p *project) runArgs(flags ...string) []string {
+	a := []string{"run"}
+	if !p.reviewBuild {
+		a = append(a, "--approve-build")
+	}
+	a = append(a, flags...)
+	return append(a, "--")
+}
+
 func (p *project) write(rel, content string) {
 	p.t.Helper()
 	path := filepath.Join(p.dir, rel)
@@ -89,7 +102,7 @@ func (p *project) run(args ...string) (string, string, int) {
 		h, _ := os.UserHomeDir()
 		realDocker = filepath.Join(h, ".docker")
 	}
-	cmd := exec.Command(bin, append([]string{"run", "--"}, args...)...)
+	cmd := exec.Command(bin, append(p.runArgs(), args...)...)
 	cmd.Dir = p.dir
 	cmd.Env = append(os.Environ(),
 		"HOME="+p.home,
@@ -433,7 +446,7 @@ func (a *approvalTerminal) answerWhenAsked(n int, key string) {
 
 func (p *project) runWithApproval(tty string, args ...string) (string, string, int) {
 	p.t.Helper()
-	cmd := exec.Command(bin, append([]string{"run", "--approval-tty", tty, "--"}, args...)...)
+	cmd := exec.Command(bin, append(p.runArgs("--approval-tty", tty), args...)...)
 	cmd.Dir = p.dir
 	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
 		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
@@ -586,3 +599,177 @@ func TestUpPrintsTheTmuxCommand(t *testing.T) {
 		t.Error("environment leaked into the tmux command line")
 	}
 }
+
+const makeProject = `
+volumes:
+  - ~/p:rw
+approval:
+  timeout: 30s
+rules:
+  - command: make
+    args: [deploy-test]
+    decision: allow
+    depends_on: auto
+`
+
+func TestEditedMakefileTurnsAnAllowIntoAnAsk(t *testing.T) {
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skip("make is not installed on the host")
+	}
+	p := newProject(t)
+	p.write("Makefile", "deploy-test:\n\t@echo deployed\n")
+	p.write("aicatraz.yaml", makeProject)
+	term := newApprovalTerminal(t)
+
+	script := `
+make deploy-test; echo "rc1=$?"
+make deploy-test; echo "rc2=$?"
+printf '\t@echo extra\n' >> Makefile
+make deploy-test; echo "rc3=$?"
+`
+	// The Makefile was never approved: the first call asks, and the human pins it.
+	// The second is silent. After the agent's edit the third asks again, and is refused.
+	go func() {
+		term.answerWhenAsked(1, "p")
+		term.answerWhenAsked(2, "n")
+	}()
+	stdout, stderr, code := p.runWithApproval(term.slave.Name(), "sh", "-c", script)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if strings.Count(stdout, "deployed") != 2 || !strings.Contains(stdout, "rc1=0") || !strings.Contains(stdout, "rc2=0") || !strings.Contains(stdout, "rc3=126") {
+		t.Errorf("unexpected output:\n%s\n%s", stdout, stderr)
+	}
+	if strings.Contains(stdout, "extra") {
+		t.Errorf("the edited Makefile ran:\n%s", stdout)
+	}
+	shown := term.text()
+	if n := strings.Count(shown, "[n] deny"); n != 2 {
+		t.Errorf("expected exactly 2 prompts, saw %d", n)
+	}
+	for _, want := range []string{"never approved before", "changed since last approved", "@echo extra", "[p]"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("approval terminal lacks %q:\n%s", want, shown)
+		}
+	}
+	// The pin store is private to the user and outside the project.
+	pinDirs, _ := filepath.Glob(filepath.Join(p.stateDir(), "*", "pins"))
+	if len(pinDirs) != 1 {
+		t.Fatalf("pin store: %v", pinDirs)
+	}
+	if st, _ := os.Stat(pinDirs[0]); st.Mode().Perm() != 0o700 {
+		t.Errorf("pin store mode %v", st.Mode().Perm())
+	}
+
+	// A new session remembers: the edited Makefile still needs approval, and then it is pinned.
+	go term.answerWhenAsked(3, "p")
+	stdout, stderr, code = p.runWithApproval(term.slave.Name(), "sh", "-c", "make deploy-test; make deploy-test")
+	if code != 0 || strings.Count(stdout, "extra") != 2 {
+		t.Fatalf("second session: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if n := strings.Count(term.text(), "[n] deny"); n != 3 {
+		t.Errorf("pinning once must be enough: %d prompts in total", n)
+	}
+
+	// Another project with the identical Makefile pins independently.
+	q := newProject(t)
+	q.write("Makefile", "deploy-test:\n\t@echo deployed\n\t@echo extra\n")
+	q.write("aicatraz.yaml", makeProject)
+	termQ := newApprovalTerminal(t)
+	go termQ.answerWhenAsked(1, "n")
+	_, stderrQ, codeQ := q.runWithApproval(termQ.slave.Name(), "make", "deploy-test")
+	if codeQ != 126 || !strings.Contains(termQ.text(), "never approved before") {
+		t.Errorf("other project: exit %d\n%s\n%s", codeQ, stderrQ, termQ.text())
+	}
+}
+
+func TestBuildFilesNeedApprovalBeforeBuilding(t *testing.T) {
+	p := newProject(t)
+	p.write("Dockerfile.az", "FROM debian:stable-slim\n")
+	p.reviewBuild = true
+	p.write("aicatraz.yaml", "project: {id: it-buildpin}\nvolumes:\n  - ~/p:rw\n")
+	p.removeImage("it-buildpin")
+
+	// Never approved and nobody to ask: refused, with the way out.
+	_, stderr, code := p.run("true")
+	if code != 2 || !strings.Contains(stderr, "--approve-build") {
+		t.Fatalf("first run: exit %d: %s", code, stderr)
+	}
+	// Explicit, non-interactive approval.
+	runFlag := func(flag string, args ...string) (string, int) {
+		cmd := exec.Command(bin, append([]string{"run", flag, "--"}, args...)...)
+		cmd.Dir = p.dir
+		cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
+			"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
+		out, err := cmd.CombinedOutput()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		}
+		return string(out), code
+	}
+	if out, code := runFlag("--approve-build", "true"); code != 0 {
+		t.Fatalf("--approve-build: exit %d: %s", code, out)
+	}
+	if _, stderr, code := p.run("true"); code != 0 {
+		t.Fatalf("pinned build must pass silently: exit %d: %s", code, stderr)
+	}
+
+	// The agent (or anyone) changes the Dockerfile.
+	p.write("Dockerfile.az", "FROM debian:stable-slim\nRUN echo changed\n")
+	_, stderr, code = p.run("true")
+	if code != 2 || !strings.Contains(stderr, "changed since") {
+		t.Fatalf("changed Dockerfile must stop the build: exit %d: %s", code, stderr)
+	}
+
+	// In a terminal the launcher shows the diff and asks.
+	cmd := exec.Command(bin, "run", "--", "true")
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
+		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptmx.Close()
+	var out syncOut
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(buf)
+			out.write(buf[:n])
+			if err != nil {
+				return
+			}
+		}
+	}()
+	deadline := time.Now().Add(60 * time.Second)
+	for !strings.Contains(out.text(), "[n] cancel") {
+		if time.Now().After(deadline) {
+			cmd.Process.Kill()
+			t.Fatalf("no build prompt; terminal shows %q", out.text())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, want := range []string{"before the image is built", "changed since last approved", "RUN echo changed"} {
+		if !strings.Contains(out.text(), want) {
+			t.Errorf("prompt lacks %q:\n%s", want, out.text())
+		}
+	}
+	time.Sleep(150 * time.Millisecond)
+	ptmx.Write([]byte("p"))
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("after approving: %v\n%s", err, out.text())
+	}
+	if _, stderr, code := p.run("true"); code != 0 {
+		t.Errorf("re-pinned build must pass silently: exit %d: %s", code, stderr)
+	}
+}
+
+type syncOut struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncOut) write(p []byte) { s.mu.Lock(); s.b.Write(p); s.mu.Unlock() }
+func (s *syncOut) text() string   { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }

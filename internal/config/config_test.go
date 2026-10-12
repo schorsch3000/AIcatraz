@@ -108,6 +108,7 @@ func TestProblems(t *testing.T) {
 		{"depends_on bad placeholder", "rules:\n  - command: make\n    decision: allow\n    depends_on: [\"{args[x]}\"]\n", 4, Error, "placeholder"},
 		{"depends_on on local", "rules:\n  - command: make\n    decision: local\n    depends_on: auto\n", 4, Warning, "ignored"},
 		{"env_pass on deny", "rules:\n  - command: make\n    decision: deny\n    env_pass: [FOO]\n", 4, Warning, "ignored"},
+		{"auto without preset", "rules:\n  - command: curl\n    decision: ask\n    depends_on: auto\n", 4, Warning, "no built-in file set"},
 		{"unknown agent", "agent:\n  tool: gemini\n", 2, Error, "unknown agent"},
 		{"bad glob", "rules:\n  - command: make\n    decision: allow\n    args: ['[']\n", 4, Error, "bad pattern"},
 		{"bad yaml", "volumes: [\n", 0, Error, ""},

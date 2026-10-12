@@ -20,6 +20,8 @@ type Entry struct {
 	Rule       *int      `json:"rule,omitempty"` // index of the matching rule; absent if none matched
 	Decision   string    `json:"decision,omitempty"`
 	Message    string    `json:"message,omitempty"`
+	Pins       string    `json:"pins,omitempty"`       // "ok" or "attention", for rules with depends_on
+	PinNotes   string    `json:"pin_notes,omitempty"`  // which files, and what is different
 	DecidedBy  string    `json:"decided_by,omitempty"` // "human", "session-grant", "timeout", "cancelled"
 	Binary     string    `json:"binary,omitempty"`
 	EnvPassed  []string  `json:"env_passed,omitempty"`

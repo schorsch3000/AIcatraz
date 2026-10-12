@@ -21,6 +21,7 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/broker"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/pins"
 	"github.com/schorsch3000/aicatraz/internal/proto"
 	"github.com/schorsch3000/aicatraz/internal/shim"
 )
@@ -68,7 +69,12 @@ func setup(t *testing.T, rulesYAML string, opts ...func(*broker.Options)) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store, err := pins.Open(filepath.Join(root, "pins"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	o := broker.Options{
+		Pins:    store,
 		UID:     os.Getuid(),
 		HostEnv: []string{"PATH=" + os.Getenv("PATH"), "HOME=/home/hosty", "USER=hosty", "HOST_ONLY_SECRET=1"},
 		Session: "test",
@@ -869,5 +875,290 @@ func TestAskPassesOnlyNamedEnvToTheHuman(t *testing.T) {
 	cmd.Run()
 	if got := f.request(0).EnvPassed; len(got) != 1 || got[0] != "FOO" {
 		t.Errorf("env shown for approval: %v", got)
+	}
+}
+
+// ---- pinned dependent files ----
+
+// depRules: `cat <file>` runs without asking as long as that file is the one
+// a human approved; `*.sh` files too, as a glob.
+const depRules = `
+rules:
+  - command: cat
+    args: ["*"]
+    decision: allow
+    depends_on: ["{args[0]}"]
+  - command: sh
+    args: ["*"]
+    decision: allow
+    depends_on: ["scripts/*.sh"]
+`
+
+func (e *env) writeFile(rel, content string) string {
+	e.t.Helper()
+	p := filepath.Join(e.dir, rel)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		e.t.Fatal(err)
+	}
+	return p
+}
+
+func TestAllowRuleWithPinnedFilesRunsSilently(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowPin}
+	e := setup(t, depRules, withApprover(f))
+	e.writeFile("data.txt", "v1\n")
+
+	// Never approved: the allow rule asks first, and the human pins the file.
+	if r := e.run("", "cat", "data.txt"); r.code != 0 || r.stdout != "v1\n" {
+		t.Fatalf("first run: %+v", r)
+	}
+	req := f.request(0)
+	if !req.CanPin || len(req.Files) != 1 || req.Files[0].Status != "never approved before" ||
+		!strings.Contains(req.Files[0].Diff, "+v1") || len(req.Warnings) == 0 {
+		t.Errorf("first prompt: %+v", req)
+	}
+
+	// Pinned now: the same call runs without a prompt.
+	if r := e.run("", "cat", "data.txt"); r.code != 0 || r.stdout != "v1\n" {
+		t.Fatalf("second run: %+v", r)
+	}
+	if f.count() != 1 {
+		t.Errorf("a pinned file must not prompt again, asked %d times", f.count())
+	}
+
+	// The agent edits the file: the next call asks again, with the diff.
+	e.writeFile("data.txt", "v2 changed\n")
+	f.mu.Lock()
+	f.answer = approve.AllowOnce
+	f.mu.Unlock()
+	if r := e.run("", "cat", "data.txt"); r.code != 0 || r.stdout != "v2 changed\n" {
+		t.Fatalf("after edit: %+v", r)
+	}
+	req = f.request(1)
+	if len(req.Files) != 1 || req.Files[0].Status != "changed since last approved" ||
+		!strings.Contains(req.Files[0].Diff, "-v1") || !strings.Contains(req.Files[0].Diff, "+v2 changed") {
+		t.Errorf("changed prompt: %+v", req)
+	}
+
+	// Approving once does not move the pin: it asks again.
+	e.run("", "cat", "data.txt")
+	if f.count() != 3 {
+		t.Errorf("run-once must not re-pin; asked %d times", f.count())
+	}
+
+	// Approving with the pin option moves it.
+	f.mu.Lock()
+	f.answer = approve.AllowPin
+	f.mu.Unlock()
+	e.run("", "cat", "data.txt")
+	e.run("", "cat", "data.txt")
+	if f.count() != 4 {
+		t.Errorf("after re-pinning there must be no more prompts; asked %d times", f.count())
+	}
+
+	var sawAttention, sawPinned bool
+	for _, en := range e.auditEntries() {
+		sawAttention = sawAttention || (en.Pins == "attention" && strings.Contains(en.PinNotes, "data.txt"))
+		sawPinned = sawPinned || strings.Contains(en.PinNotes, "[pinned]")
+	}
+	if !sawAttention || !sawPinned {
+		t.Errorf("audit lacks pin results: %+v", e.auditEntries())
+	}
+}
+
+func TestChangedFileWithoutApproverIsDeniedWithTheReason(t *testing.T) {
+	e := setup(t, depRules) // no approver
+	e.writeFile("data.txt", "v1\n")
+	r := e.run("", "cat", "data.txt")
+	if r.code != shim.ExitDenied || r.stdout != "" || !strings.Contains(r.stderr, "data.txt: never approved before") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestOnlyAHumanAnswerMovesAPin(t *testing.T) {
+	e := setup(t, depRules, withApprover(&fakeApprover{answer: approve.Deny}))
+	e.writeFile("data.txt", "v1\n")
+	for i := 0; i < 3; i++ {
+		if r := e.run("", "cat", "data.txt"); r.code != shim.ExitDenied {
+			t.Fatalf("run %d: %+v", i, r)
+		}
+	}
+	// Nothing in the agent's reach can create a pin either: its own writes are just changes.
+	e2 := setup(t, depRules)
+	e2.writeFile("data.txt", "v1\n")
+	e2.run("", "cat", "data.txt")
+	e2.run("", "cat", "data.txt")
+	if r := e2.run("", "cat", "data.txt"); r.code != shim.ExitDenied {
+		t.Errorf("repetition must not create trust: %+v", r)
+	}
+}
+
+func TestSessionGrantDoesNotSurviveAFileChange(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowSession}
+	e := setup(t, depRules, withApprover(f))
+	e.writeFile("data.txt", "v1\n")
+	e.run("", "cat", "data.txt")
+	e.run("", "cat", "data.txt") // granted for exactly this content
+	if f.count() != 1 {
+		t.Fatalf("asked %d times", f.count())
+	}
+	e.writeFile("data.txt", "v2\n")
+	if r := e.run("", "cat", "data.txt"); r.code != 0 || r.stdout != "v2\n" {
+		t.Fatalf("%+v", r)
+	}
+	if f.count() != 2 {
+		t.Errorf("a changed file must void the grant; asked %d times", f.count())
+	}
+}
+
+func TestNewAndDeletedFilesMatchingAGlobAreNoticed(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowPin}
+	e := setup(t, depRules, withApprover(f))
+	e.writeFile("scripts/a.sh", "echo a\n")
+	e.writeFile("scripts/b.sh", "echo b\n")
+	if r := e.run("", "sh", "scripts/a.sh"); r.code != 0 || r.stdout != "a\n" {
+		t.Fatalf("%+v", r)
+	}
+	if got := f.request(0).Files; len(got) != 2 {
+		t.Fatalf("both scripts are dependencies: %+v", got)
+	}
+	e.run("", "sh", "scripts/a.sh")
+	if f.count() != 1 {
+		t.Fatalf("pinned: asked %d times", f.count())
+	}
+
+	e.writeFile("scripts/evil.sh", "echo evil\n") // a new file appears
+	e.run("", "sh", "scripts/a.sh")
+	if f.count() != 2 || len(f.request(1).Files) != 1 || f.request(1).Files[0].Status != "never approved before" {
+		t.Fatalf("new file not noticed: %+v", f.request(1))
+	}
+
+	os.Remove(filepath.Join(e.dir, "scripts", "b.sh")) // one disappears
+	e.run("", "sh", "scripts/a.sh")
+	if f.count() != 3 || f.request(2).Files[0].Status != "deleted since last approved" {
+		t.Fatalf("deleted file not noticed: %+v", f.request(2))
+	}
+}
+
+func TestFileChangedWhileTheHumanDecides(t *testing.T) {
+	// An approver that approves, but only after the agent has swapped the file.
+	swap := &swappingApprover{}
+	e := setup(t, depRules, withApprover(swap))
+	swap.set(e.writeFile("data.txt", "v1\n"))
+	r := e.run("", "cat", "data.txt")
+	if r.code != shim.ExitDenied || strings.Contains(r.stdout, "evil") || !strings.Contains(r.stderr, "changed while") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+type swappingApprover struct {
+	mu   sync.Mutex
+	path string
+}
+
+func (s *swappingApprover) set(p string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.path = p
+}
+
+func (s *swappingApprover) Ask(ctx context.Context, req approve.Request, timeout time.Duration) (approve.Answer, error) {
+	s.mu.Lock()
+	p := s.path
+	s.mu.Unlock()
+	os.WriteFile(p, []byte("evil\n"), 0o644)
+	return approve.AllowOnce, nil
+}
+
+func TestDependentFilesMustBeInVisibleVolumes(t *testing.T) {
+	e := setup(t, depRules, withApprover(&fakeApprover{answer: approve.AllowPin}))
+	r := e.run("", "cat", "/etc/passwd")
+	if r.code != shim.ExitDenied || !strings.Contains(r.stderr, "outside the mounted volumes") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestHiddenFileCannotBeADependency(t *testing.T) {
+	root, _ := os.MkdirTemp("", "bk")
+	defer os.RemoveAll(root)
+	work := filepath.Join(root, "w")
+	os.MkdirAll(work, 0o755)
+	os.WriteFile(filepath.Join(work, ".env"), []byte("SECRET=1\n"), 0o644)
+	cfg, ps := config.Parse([]byte("volumes:\n  - "+work+":rw\n  - "+work+"/.env:hi\n"+depRules), config.Options{Home: "/home/nobody"})
+	if config.HasErrors(ps) {
+		t.Fatal(ps)
+	}
+	store, _ := pins.Open(filepath.Join(root, "pins"))
+	b, err := broker.New(cfg, broker.Options{UID: os.Getuid(), HostEnv: os.Environ(), Pins: store, Approver: &fakeApprover{answer: approve.AllowPin}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(root, "s")
+	l, _ := net.Listen("unix", sock)
+	go b.Serve(l)
+	defer b.Close()
+	cmd := exec.Command(os.Args[0], ".env")
+	cmd.Dir = work
+	cmd.Env = []string{"AICATRAZ_TEST_SHIM=cat", "AICATRAZ_TEST_SOCK=" + sock}
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	code := exitCode(t, cmd.Run())
+	if code != shim.ExitDenied || strings.Contains(out.String(), "SECRET") || !strings.Contains(errb.String(), "hidden") {
+		t.Fatalf("code %d out %q err %q", code, out.String(), errb.String())
+	}
+}
+
+func TestAskRuleStillAsksWhenFilesAreClean(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowPin}
+	e := setup(t, `
+rules:
+  - command: cat
+    args: ["*"]
+    decision: ask
+    depends_on: ["{args[0]}"]
+`, withApprover(f))
+	e.writeFile("data.txt", "v1\n")
+	e.run("", "cat", "data.txt") // asks, pins
+	e.run("", "cat", "data.txt") // clean, but the rule says ask
+	if f.count() != 2 {
+		t.Fatalf("asked %d times", f.count())
+	}
+	if req := f.request(1); len(req.Files) != 0 || req.CanPin {
+		t.Errorf("clean files need no warning or pin option: %+v", req)
+	}
+}
+
+func TestTooManyDependenciesAlwaysAsk(t *testing.T) {
+	f := &fakeApprover{answer: approve.AllowPin}
+	e := setup(t, `
+rules:
+  - command: cat
+    args: ["*"]
+    decision: allow
+    depends_on: ["many/*"]
+`, withApprover(f))
+	for i := 0; i < pins.MaxFiles+3; i++ {
+		e.writeFile(fmt.Sprintf("many/f%03d", i), "x")
+	}
+	e.writeFile("data.txt", "v")
+	e.run("", "cat", "data.txt")
+	e.run("", "cat", "data.txt")
+	if f.count() != 2 {
+		t.Errorf("an unpinnable rule must ask every time; asked %d", f.count())
+	}
+	if req := f.request(0); req.CanPin || len(req.Files) != 1 || !strings.Contains(req.Files[0].Status, "too many") {
+		t.Errorf("%+v", req)
+	}
+}
+
+func TestDependsOnWithoutAPinStoreFailsClosed(t *testing.T) {
+	e := setup(t, depRules, func(o *broker.Options) { o.Pins = nil })
+	e.writeFile("data.txt", "v1\n")
+	r := e.run("", "cat", "data.txt")
+	if r.code != shim.ExitDenied || !strings.Contains(r.stderr, "pin store") {
+		t.Fatalf("%+v", r)
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/schorsch3000/aicatraz/internal/pins"
 )
 
 var (
@@ -277,6 +279,10 @@ func (v *validator) rules(c *Config) {
 			if _, err := path.Match(probe, ""); err != nil {
 				v.errorf(p, "bad pattern %q: %v", pat, err)
 			}
+		}
+
+		if r.DependsOn.Auto && r.Command != "" && !strings.ContainsAny(r.Command, "*?[") && !pins.HasPreset(r.Command) {
+			v.warnf(at("depends_on"), "no built-in file set for %q: list the files it depends on explicitly", r.Command)
 		}
 
 		if r.Decision == "local" || r.Decision == "deny" {

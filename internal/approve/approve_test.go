@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestQuoteNeutralisesTerminalInput(t *testing.T) {
-	hostile := "ok\x1b[2J\x1b[Hdeny? press y\r\x07‮"
+	hostile := "ok\x1b[2J\x1b[Hdeny? press y\r\x07\u202e"
 	q := Quote(hostile)
 	for _, r := range q {
 		if r < 0x20 || r == 0x7f || r > 0x7e {
@@ -298,5 +298,101 @@ func TestTmuxApproverTmuxFailure(t *testing.T) {
 	got, err := a.Ask(context.Background(), Request{Name: "x"}, time.Second)
 	if got != Deny || err == nil || !strings.Contains(err.Error(), "no current client") {
 		t.Errorf("%v %v", got, err)
+	}
+}
+
+func TestSanitizeKeepsContentReadableButNeverRaw(t *testing.T) {
+	got := Sanitize("echo \"hi\" \\\n\tx\x1b[2Jy\u202ez\r\x00")
+	if !strings.Contains(got, `echo "hi" \`) || !strings.Contains(got, "    x") {
+		t.Errorf("readable text mangled: %q", got)
+	}
+	for _, r := range got {
+		if r == '\n' {
+			continue
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || r == 0x202e {
+			t.Fatalf("unprintable %U survived: %q", r, got)
+		}
+	}
+	for _, want := range []string{`\u001b`, `\u202e`, `\u000d`, `\u0000`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing visible escape %s in %q", want, got)
+		}
+	}
+}
+
+func TestRenderFileChanges(t *testing.T) {
+	diff := "--- approved: Makefile\n+++ now: Makefile\n@@ -1 +1 @@\n-all: ok\n+all:\x1b[31m rm -rf ~\n"
+	r := Request{
+		Name: "make", Args: []string{"deploy"}, Cwd: "/p", Binary: "/usr/bin/make", CanPin: true,
+		Files: []FileChange{
+			{Path: "/p/Makefile", Status: "changed since last approved", Diff: diff},
+			{Path: "/p/new.mk", Status: "never approved before", Note: "binary file"},
+		},
+	}
+	out := Render(r)
+	for _, want := range []string{"/p/Makefile", "changed since last approved", "| -all: ok", `\u001b[31m rm -rf ~`, "never approved before", "binary file", "[p]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	for _, c := range out {
+		if (c < 0x20 && c != '\n') || c == 0x7f {
+			t.Fatalf("control character %U in prompt", c)
+		}
+	}
+	if strings.Contains(Render(Request{Name: "x"}), "[p]") {
+		t.Error("no pin option without pinnable files")
+	}
+
+	// Long diffs are cut and say so.
+	var long strings.Builder
+	for i := 0; i < 100; i++ {
+		long.WriteString("+line\n")
+	}
+	cut := Render(Request{Name: "x", Files: []FileChange{{Path: "f", Status: "x", Diff: long.String()}}})
+	if !strings.Contains(cut, "60 more lines") {
+		t.Errorf("long diff not cut:\n%s", cut)
+	}
+}
+
+func TestRenderBuild(t *testing.T) {
+	out := Render(Request{Kind: KindBuild, Name: "docker build", Cwd: "/p", CanPin: true,
+		Files: []FileChange{{Path: "/p/Dockerfile.az", Status: "changed since last approved"}}})
+	if !strings.Contains(out, "before the image is built") || strings.Contains(out, "ON THE HOST") || strings.Contains(out, "[s]") {
+		t.Errorf("%s", out)
+	}
+}
+
+func TestPromptPinKey(t *testing.T) {
+	for _, tc := range []struct {
+		req  Request
+		keys string
+		want Answer
+	}{
+		{Request{Name: "x", CanPin: true}, "p", AllowPin},
+		{Request{Name: "x"}, "py", AllowOnce},                                // p is ignored when there is nothing to pin
+		{Request{Name: "x", Kind: KindBuild, CanPin: true}, "sy", AllowOnce}, // no session grants for builds
+		{Request{Name: "x", Kind: KindBuild, CanPin: true}, "P", AllowPin},
+	} {
+		m, s := ptyPair(t)
+		res := make(chan Answer, 1)
+		go func() {
+			a, _ := Prompt(context.Background(), s, s, tc.req, 5*time.Second)
+			res <- a
+		}()
+		marker := "deny"
+		if tc.req.Kind == KindBuild {
+			marker = "cancel"
+		}
+		readUntil(t, m, marker, 3*time.Second)
+		time.Sleep(100 * time.Millisecond)
+		m.Write([]byte(tc.keys))
+		if got := <-res; got != tc.want {
+			t.Errorf("%+v keys %q: got %v, want %v", tc.req.Kind, tc.keys, got, tc.want)
+		}
+	}
+	if ParseAnswer(AllowPin.String()) != AllowPin {
+		t.Error("pin round trip")
 	}
 }

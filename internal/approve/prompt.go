@@ -43,7 +43,7 @@ func Prompt(ctx context.Context, in *os.File, out io.Writer, req Request, timeou
 	}
 
 	deadline := time.Now().Add(timeout)
-	answer, err := readAnswer(ctx, in, deadline)
+	answer, err := readAnswer(ctx, in, deadline, req)
 	nl := "\n"
 	if raw {
 		nl = "\r\n"
@@ -65,11 +65,13 @@ func answerText(a Answer) string {
 		return "running once"
 	case AllowSession:
 		return "running; this exact call is allowed for the session"
+	case AllowPin:
+		return "approved and remembered"
 	}
 	return "denied"
 }
 
-func readAnswer(ctx context.Context, in *os.File, deadline time.Time) (Answer, error) {
+func readAnswer(ctx context.Context, in *os.File, deadline time.Time, req Request) (Answer, error) {
 	fd := int(in.Fd())
 	buf := make([]byte, 1)
 	for {
@@ -104,7 +106,13 @@ func readAnswer(ctx context.Context, in *os.File, deadline time.Time) (Answer, e
 		case 'y', 'Y':
 			return AllowOnce, nil
 		case 's', 'S':
-			return AllowSession, nil
+			if req.Kind != KindBuild {
+				return AllowSession, nil
+			}
+		case 'p', 'P':
+			if req.CanPin {
+				return AllowPin, nil
+			}
 		case 'n', 'N', '\r', '\n', 27, 3, 4:
 			return Deny, nil
 		}

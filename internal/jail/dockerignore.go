@@ -3,6 +3,7 @@ package jail
 import (
 	"bufio"
 	"fmt"
+	"github.com/schorsch3000/aicatraz/internal/glob"
 	"io"
 	"os"
 	"path"
@@ -42,7 +43,7 @@ func ParseIgnore(r io.Reader) (*Ignore, error) {
 		if line == "" || line == "." {
 			continue
 		}
-		re, err := compileGlob(line)
+		re, err := glob.Compile(line)
 		if err != nil {
 			return nil, fmt.Errorf("bad pattern %q: %w", line, err)
 		}
@@ -71,50 +72,6 @@ func (p ignorePattern) matches(rel string) bool {
 		}
 	}
 	return false
-}
-
-func compileGlob(g string) (*regexp.Regexp, error) {
-	var b strings.Builder
-	b.WriteString("^")
-	for i := 0; i < len(g); i++ {
-		c := g[i]
-		switch c {
-		case '*':
-			if i+1 < len(g) && g[i+1] == '*' {
-				i++
-				if i+1 < len(g) && g[i+1] == '/' {
-					i++
-					b.WriteString("(?:.*/)?") // **/ matches zero or more directories
-				} else {
-					b.WriteString(".*")
-				}
-			} else {
-				b.WriteString("[^/]*")
-			}
-		case '?':
-			b.WriteString("[^/]")
-		case '[':
-			j := strings.IndexByte(g[i:], ']')
-			if j < 0 {
-				return nil, fmt.Errorf("unterminated character class")
-			}
-			class := g[i+1 : i+j]
-			if strings.HasPrefix(class, "!") {
-				class = "^" + class[1:]
-			}
-			b.WriteString("[" + class + "]")
-			i += j
-		case '\\':
-			if i+1 < len(g) {
-				i++
-				b.WriteString(regexp.QuoteMeta(string(g[i])))
-			}
-		default:
-			b.WriteString(regexp.QuoteMeta(string(c)))
-		}
-	}
-	b.WriteString("$")
-	return regexp.Compile(b.String())
 }
 
 // ignoreFilesFor lists the ignore files that may apply to a build: the

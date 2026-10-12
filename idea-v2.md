@@ -180,26 +180,37 @@ depends_on: [ "{args[0]}" ]               # a path taken from the call itself
 2. On a request, the broker re-hashes the rule's dependent files and compares to the pin.
 3. All hashes match: the rule's decision stands, so `allow` stays `allow`.
 4. Any file is new, changed or gone: **the decision becomes `ask`**, and the prompt carries a prominent warning and the unified diff against the pinned version. For a first-ever run there is no pin; the prompt says "never approved before".
-5. When you approve, you choose **approve once** or **approve and re-pin**. Only a human answer ever updates the pin store; the agent can never move a pin.
+5. When you approve, you choose `y` **run once** (the pin stays as it was, so the next call asks again), `p` **run and remember** (the shown versions become the pin), or `s` for a session grant. Only the `p` answer from a human ever updates the pin store; the agent can never move a pin, and repeating a call never creates trust. What is pinned is the snapshot the prompt showed, not a fresh read.
+6. Right before the command starts the broker checks the files again; if they changed while the request was being processed (for example while the prompt was open) the call is denied.
 
 `ask` rules get the same check and the same warning, so you always see what changed since you last looked, even though you are asked anyway.
+
+Details worth knowing:
+- Pins are per file, not per rule. A file you approved while reviewing one rule counts as approved for every rule of the project that depends on it.
+- A glob also notices a **new** file that matches and a pinned file that **disappeared**.
+- A session grant (`s`) is tied to the exact contents of the dependent files at that moment. If a file changes, the grant no longer applies.
+- `{args[N]}` is filled with the argument taken literally (`*` in an argument is not a wildcard), and every dependent file must be inside a mounted volume and not inside a hidden path, otherwise the call is denied. A rule with `depends_on` but no pin store is denied, never run unchecked.
+- More than 200 dependent files can't be pinned: such a rule asks every time, without the `p` option.
+- A file larger than 256 KiB is pinned by hash; the prompt then says that no diff is available.
 
 **Presets for `depends_on: auto`**
 
 | Command | Files pinned |
 |---|---|
 | `make` | `Makefile`, `makefile`, `GNUmakefile`, `*.mk`, plus files named by `include` found while hashing |
-| `npm`, `pnpm`, `yarn` | `package.json`, lockfile, `.npmrc`, scripts it names |
-| `git` | `.git/config`, `.git/hooks/*`, `.gitattributes` |
-| `python`, `bash`, `sh`, `node` | the script argument itself |
-| `docker`, `docker compose` | `Dockerfile`, `compose*.y*ml` |
+| `npm`, `npx`, `pnpm`, `yarn` | `package.json`, the lockfiles, `.npmrc`, `.yarnrc*` |
+| `git` | `.git/config`, `.git/hooks/*`, `.gitattributes`, `.gitmodules` (repository root found upwards from the working directory) |
+| `python*`, `bash`, `sh`, `dash`, `zsh`, `node`, `ruby`, `perl`, `php` | the script argument itself (none for `-c`, `-e`, `-m`) |
+| `docker`, `docker-compose` | `Dockerfile`, `Dockerfile.*`, `compose*.y*ml`, `docker-compose*.y*ml`, `.dockerignore` |
 
-Presets are a starting point; for commands outside the table you write the list yourself. The linter warns when an `allow` rule on a known workspace-executing command has no `depends_on`.
+Presets are a starting point; for commands outside the table you write the list yourself (`aicatraz config check` warns when `depends_on: auto` is used on a command without a preset). The "no `depends_on` on a workspace-executing rule" warning arrives with the linter in M6.
 
 **Honest limits**
 - The pin only covers files you list (or the preset knows). A Makefile that calls `./build.sh` is covered only if `build.sh` is in the list. Keep `depends_on` generous: `scripts/**` is cheap.
 - There is a small window between hashing and the executed program reading the file. The broker re-hashes immediately before `exec`, which closes the long gap but not the tiny one. For stronger guarantees, mount the pinned files `ro` (e.g. `~/git/myproject/Makefile:ro`); then the agent can't change them at all and the pin store is just a backstop.
-- Hidden files (`hi`) are read by the broker from the real path and can be pinned too.
+- A file in a hidden path can **not** be a dependency: the broker would otherwise read it and put its content into a prompt. Such a rule is denied.
+
+**The image build is pinned the same way.** The files that define it (`Dockerfile.az`, the ignore files, and single files named by `COPY`/`ADD`) are checked before the launcher builds. If one is new or changed, the launcher shows the diff and asks on its own terminal (the agent isn't running yet), with `y` build once, `p` build and remember, `n` cancel. Without a terminal it refuses and says so; `--approve-build` pins non-interactively. Directories copied wholesale (`COPY . /app`) are not pinned, since that is the project's own code, which the agent legitimately edits.
 
 ### Environment for proxied commands: whitelist, not blacklist
 The broker builds the env itself:

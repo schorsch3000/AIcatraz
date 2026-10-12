@@ -15,7 +15,7 @@ import (
 const defaultConfig = "aicatraz.yaml"
 
 const usage = `usage:
-  aicatraz up [-c file] [--print] [--approval-tty dev] [-- command...]
+  aicatraz up [-c file] [--print] [--approval-tty dev] [--approve-build] [-- command...]
                                  start the jail in a tmux session (prompts for 'ask'
                                  rules appear as popups); attaches if it already runs
   aicatraz run [-c file] [--print] [--approval-tty dev] [-- command...]
@@ -105,6 +105,9 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		case (a == "-c" || a == "--config") && len(args) >= 2:
 			opts.ConfigPath = args[1]
 			args = args[2:]
+		case a == "--approve-build" && verb != "shell":
+			opts.ApproveBuild = true
+			args = args[1:]
 		case a == "--approval-tty" && len(args) >= 2 && verb != "shell":
 			opts.ApprovalTTY = args[1]
 			args = args[2:]

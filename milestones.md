@@ -54,6 +54,8 @@ The first version of the door.
 **Done when:** a scripted run answers prompts through tmux; the agent's own input can't reach or answer a prompt; no answer within the timeout is a deny; the log records who decided.
 
 ## M4: pins and dependent files
+
+*Status: implemented. Tested at three levels: the pin store and file resolution (unit), the broker (real socket, shim subprocess), and against real containers (the Makefile story: edit in the jail, prompt with diff, re-pin, separate projects; and the Dockerfile.az build prompt).*
 - Per-project pin store (`~/.local/state/aicatraz/<project-id>/pins/`), project ID from the config's `realpath`.
 - `depends_on`: presets (`auto`), globs, `{args[0]}`.
 - Changed, new or missing file turns `allow` into `ask` with a warning and unified diff; `ask` rules show the same warning.

@@ -41,6 +41,9 @@ func UpArgs(tmux, self, cfgPath, cwd, envFile string, attach bool, o Options) []
 	if o.ApprovalTTY != "" {
 		run = append(run, "--approval-tty", o.ApprovalTTY)
 	}
+	if o.ApproveBuild {
+		run = append(run, "--approve-build")
+	}
 	if len(o.Command) > 0 {
 		run = append(run, "--")
 		run = append(run, o.Command...)

@@ -23,6 +23,7 @@ import (
 
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/pins"
 	"github.com/schorsch3000/aicatraz/internal/policy"
 	"github.com/schorsch3000/aicatraz/internal/proto"
 )
@@ -52,6 +53,10 @@ type Options struct {
 	// and such commands are denied.
 	Approver        approve.Approver
 	ApprovalTimeout time.Duration // default 2 minutes
+
+	// Pins remembers which versions of a rule's dependent files were approved.
+	// A rule with depends_on and no store is denied rather than run unchecked.
+	Pins *pins.Store
 }
 
 // Broker serves host command requests.
@@ -231,12 +236,34 @@ func (b *Broker) handle(nc net.Conn) {
 	}
 	env, passed := BuildEnv(b.opts.HostEnv, h.Env, d.Config, b.cfg.Global.EnvStrip)
 
-	if d.Action == policy.Ask {
-		ok, by, msg := b.askHuman(conn, in, &h, d, bin, cwd, passed)
-		entry.DecidedBy = by
-		if !ok {
-			deny(msg)
+	// Files the rule depends on: if any is new, changed or gone since a human
+	// last approved it, an `allow` becomes an `ask`.
+	deps, err := b.checkDeps(d.Config, &h, cwd)
+	if err != nil {
+		deny(err.Error())
+		return
+	}
+	forcedByPins := d.Action == policy.Allow && deps.attention()
+	if deps.checked {
+		entry.Pins = "ok"
+		if deps.attention() {
+			entry.Pins, entry.PinNotes = "attention", deps.summary()
+		}
+	}
+
+	if d.Action == policy.Ask || forcedByPins {
+		res := b.askHuman(conn, in, &h, d, bin, cwd, passed, deps, forcedByPins)
+		entry.DecidedBy = res.by
+		if !res.ok {
+			deny(res.msg)
 			return
+		}
+		if res.pin {
+			if err := deps.pin(b.opts.Pins); err != nil {
+				deny("could not remember the approved files: " + err.Error())
+				return
+			}
+			entry.PinNotes = strings.TrimSpace(entry.PinNotes + " [pinned]")
 		}
 	}
 
@@ -245,6 +272,13 @@ func (b *Broker) handle(nc net.Conn) {
 		defer func() { <-b.sem }()
 	default:
 		deny("too many host commands running at once")
+		return
+	}
+
+	// The files were read a moment ago; make sure they are still what was
+	// checked (or approved), right before the command starts.
+	if err := b.recheckDeps(d.Config, &h, cwd, deps); err != nil {
+		deny(err.Error())
 		return
 	}
 
@@ -526,30 +560,45 @@ func ruleText(i int, r *config.Rule) string {
 	return txt + " (" + r.Decision + ")"
 }
 
-// askHuman handles an `ask` decision. It returns whether the command may run,
-// who decided, and the message for the agent if not. While the human thinks it
-// keeps the connection alive and notices if the agent gives up.
-func (b *Broker) askHuman(conn *proto.Conn, in <-chan frame, h *proto.Hello, d policy.Decision, bin, cwd string, passed []string) (bool, string, string) {
-	key := grantKey(h.Name, h.Args, cwd)
+type askResult struct {
+	ok  bool
+	by  string
+	msg string
+	pin bool // remember the shown file versions as approved
+}
+
+// askHuman handles an `ask` decision, whether the rule says ask or changed
+// files turned an allow into one. It keeps the connection alive while the
+// human thinks and notices if the agent gives up.
+func (b *Broker) askHuman(conn *proto.Conn, in <-chan frame, h *proto.Hello, d policy.Decision, bin, cwd string, passed []string, deps depState, forcedByPins bool) askResult {
+	key := grantKey(h.Name, h.Args, cwd) + "\x00" + deps.fingerprint()
 	if b.granted(key) {
-		return true, "session-grant", ""
+		return askResult{ok: true, by: "session-grant"}
 	}
 	if b.opts.Approver == nil {
-		return false, "", "approval is not available: start the session with `aicatraz up` (tmux) or --approval-tty"
+		msg := "approval is not available: start the session with `aicatraz up` (tmux) or --approval-tty"
+		if deps.attention() {
+			msg = "files this command depends on changed since they were last approved (" + deps.summary() + "), and " + msg
+		}
+		return askResult{msg: msg}
 	}
 	select {
 	case b.pending <- struct{}{}:
 		defer func() { <-b.pending }()
 	default:
-		return false, "", "too many approvals are already waiting"
+		return askResult{msg: "too many approvals are already waiting"}
 	}
 
 	req := approve.Request{
 		Name: h.Name, Args: h.Args, Cwd: cwd, Binary: bin, EnvPassed: passed,
 		Rule: d.Rule, RuleText: ruleText(d.Rule, d.Config),
+		Files: deps.changes(), CanPin: deps.attention() && deps.pinnable(),
+	}
+	if forcedByPins {
+		req.Warnings = append(req.Warnings, "this rule normally runs without asking, but files it depends on are not as last approved")
 	}
 	rule := d.Rule
-	b.audit(Entry{Event: "ask", PeerPID: 0, Name: h.Name, Args: h.Args, Cwd: cwd, Rule: &rule, Binary: bin, EnvPassed: passed})
+	b.audit(Entry{Event: "ask", Name: h.Name, Args: h.Args, Cwd: cwd, Rule: &rule, Binary: bin, EnvPassed: passed, PinNotes: deps.summary()})
 
 	timeout := b.opts.ApprovalTimeout
 	ctx, cancel := context.WithTimeout(b.ctx, timeout+approvalSlack)
@@ -578,18 +627,20 @@ func (b *Broker) askHuman(conn *proto.Conn, in <-chan frame, h *proto.Hello, d p
 
 	switch {
 	case err == nil && ans == approve.AllowOnce:
-		return true, "human", ""
+		return askResult{ok: true, by: "human"}
+	case err == nil && ans == approve.AllowPin && req.CanPin:
+		return askResult{ok: true, by: "human", pin: true}
 	case err == nil && ans == approve.AllowSession:
 		b.grant(key)
-		return true, "human", ""
+		return askResult{ok: true, by: "human"}
 	case err == nil:
-		return false, "human", "denied by the user"
+		return askResult{by: "human", msg: "denied by the user"}
 	case errors.Is(err, approve.ErrTimeout) || errors.Is(err, context.DeadlineExceeded):
-		return false, "timeout", "nobody answered the approval prompt in time"
+		return askResult{by: "timeout", msg: "nobody answered the approval prompt in time"}
 	case errors.Is(err, context.Canceled):
-		return false, "cancelled", "the request was cancelled"
+		return askResult{by: "cancelled", msg: "the request was cancelled"}
 	case errors.Is(err, approve.ErrUnavailable):
-		return false, "", "approval is not available: " + err.Error()
+		return askResult{msg: "approval is not available: " + err.Error()}
 	}
-	return false, "", "approval failed: " + err.Error()
+	return askResult{msg: "approval failed: " + err.Error()}
 }
