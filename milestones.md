@@ -16,6 +16,8 @@ Repo, Go module, `argv[0]` dispatch, CI (build, vet, unit tests), strict YAML co
 **Done when:** valid and invalid example configs behave as specified in unit tests; the binary builds statically.
 
 ## M1: the jail (useful on its own)
+
+*Status: implemented as `aicatraz run [-c file] [--print] [-- command...]`; `make test-integration` runs the checks below against real containers. The shim directory is built and mounted but `PATH` is not changed yet, because the shim is still a stub and would shadow the container's own `make`; the `PATH` prepend lands with M2.*
 Launcher turns a config into a hardened `docker run`.
 - Image from `Dockerfile.az` (or a plain image reference, or a built-in default), built on every `up` and tagged per project. Image `ENTRYPOINT`/`CMD` replaced by AIcatraz's init; `--user` with the host UID and generated read-only `/etc/passwd` and `group`.
 - Launcher refuses to build if a `hi` path is not excluded by `.dockerignore`.

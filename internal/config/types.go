@@ -13,6 +13,7 @@ type Config struct {
 	Image   ImageSpec `yaml:"image"`
 	Volumes []string  `yaml:"volumes"`
 	Env     Env       `yaml:"env"`
+	Limits  Limits    `yaml:"limits"`
 	Global  Global    `yaml:"global"`
 	Rules   []Rule    `yaml:"rules"`
 	Agent   Agent     `yaml:"agent"`
@@ -56,6 +57,13 @@ func (i *ImageSpec) UnmarshalYAML(n *yaml.Node) error {
 		return nil
 	}
 	return fmt.Errorf("line %d: image must be a string or a mapping", n.Line)
+}
+
+// Limits caps the container's resources. Zero values mean the default
+// (pids) or no limit (memory).
+type Limits struct {
+	Pids   int    `yaml:"pids"`
+	Memory string `yaml:"memory"`
 }
 
 type Env struct {
@@ -140,4 +148,17 @@ type Problem struct {
 	Path     string
 	Severity Severity
 	Msg      string
+}
+
+// Format renders a problem as "file:line: error: message".
+func (p Problem) Format(file string) string {
+	label := "error"
+	if p.Severity == Warning {
+		label = "warning"
+	}
+	loc := file
+	if p.Line > 0 {
+		loc = fmt.Sprintf("%s:%d", file, p.Line)
+	}
+	return fmt.Sprintf("%s: %s: %s", loc, label, p.Msg)
 }

@@ -12,6 +12,7 @@ import (
 
 var (
 	envName     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	memorySize  = regexp.MustCompile(`^[1-9][0-9]*[bkmgBKMG]?$`)
 	projectID   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	secretName  = regexp.MustCompile(`(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)`)
 	placeholder = regexp.MustCompile(`\{args\[\d+\]\}`)
@@ -65,6 +66,7 @@ func (v *validator) validate(c *Config) {
 	v.image(c)
 	v.volumes(c)
 	v.env(c)
+	v.limits(c)
 	v.global(c)
 	v.rules(c)
 	v.agent(c)
@@ -127,6 +129,10 @@ func (v *validator) volumes(c *Config) {
 			continue
 		}
 		full = filepath.Clean(full)
+		if strings.ContainsAny(full, ",\n") {
+			v.errorf(p, "volume %q: commas and newlines in paths are not supported", spec)
+			continue
+		}
 
 		if mode != ModeHide && (full == "/" || full == v.home || inside(full, v.home)) {
 			v.errorf(p, "volume %q would expose your home directory; mount specific subdirectories instead", spec)
@@ -178,6 +184,15 @@ func (v *validator) env(c *Config) {
 		if secretName.MatchString(name) {
 			v.warnf(p, "%s looks like a secret; the agent can read it and has network access", name)
 		}
+	}
+}
+
+func (v *validator) limits(c *Config) {
+	if c.Limits.Pids < 0 {
+		v.errorf([]any{"limits", "pids"}, "pids must not be negative")
+	}
+	if m := c.Limits.Memory; m != "" && !memorySize.MatchString(m) {
+		v.errorf([]any{"limits", "memory"}, "invalid memory size %q (examples: 512m, 2g)", m)
 	}
 }
 

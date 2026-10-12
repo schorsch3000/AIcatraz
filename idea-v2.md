@@ -82,6 +82,8 @@ Rules the launcher enforces:
 - A nested entry must be inside a mounted parent, and its target must exist at launch. A missing `.env` is an error, not a silent skip, because otherwise the agent could create it.
 - Hidden paths are still visible to **proxied host commands**: `make deploy` can read `.env`, the agent can't. That is the point.
 
+**Writes to a hidden file are accepted and discarded.** The file is `/dev/null` underneath, so `echo x > .env` in the jail succeeds and changes nothing. Deleting or renaming it fails with `EBUSY`.
+
 **Known weak spot for single-file hides.** A bind mount sits on a specific inode. If an editor on the host saves `.env` by writing a new file and renaming it over the old one, the name now points at a new inode, nothing is mounted over it, and the agent can read the real contents. Two defences: prefer hiding a **directory** (`.secrets/`, `config/private/`), where file replacement inside it doesn't matter; and the broker runs a canary check (inode of every `hi` file as seen from inside the container) at each command and on a timer, and freezes the session with a loud warning if one stops being hidden.
 
 ### Container environment
