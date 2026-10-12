@@ -44,9 +44,15 @@ func UpArgs(tmux, self, cfgPath, cwd, envFile string, attach bool, o Options) []
 	if o.ApproveBuild {
 		run = append(run, "--approve-build")
 	}
-	if len(o.Command) > 0 {
+	if o.Agent != "" {
+		run = append(run, "--agent", o.Agent)
+	}
+	if o.Resume != "" {
+		run = append(run, "--resume", o.Resume)
+	}
+	if rest := append(append([]string(nil), o.Command...), o.AgentArgs...); len(rest) > 0 {
 		run = append(run, "--")
-		run = append(run, o.Command...)
+		run = append(run, rest...)
 	}
 	// Keep the pane open on failure so the error can be read.
 	script := `"$@"; c=$?; if [ "$c" -ne 0 ]; then printf '\naicatraz exited with status %s - press Enter to close\n' "$c"; read -r _; fi; exit "$c"`

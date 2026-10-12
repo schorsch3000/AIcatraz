@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/term"
 
@@ -30,6 +31,9 @@ type Options struct {
 	Print        bool     // show what would run, change nothing
 	ApprovalTTY  string   // prompt for `ask` rules on this terminal device instead of tmux
 	ApproveBuild bool     // pin changed build files without asking
+	Agent        string   // start this coding agent ("@config" for the configured one)
+	AgentArgs    []string // arguments for the agent
+	Resume       string   // continue this agent session
 	Stdout       io.Writer
 	Stderr       io.Writer
 }
@@ -129,6 +133,13 @@ func Launch(o Options) (int, error) {
 		SocketPath: filepath.Join(runDir, "broker.sock"),
 		ImagePath:  imagePath("docker", img.Ref),
 	}
+	var ag *agentRun
+	if o.Agent != "" {
+		if ag, err = planAgent(o, cfg, home, state, uid, gid, o.Print); err != nil {
+			return 0, err
+		}
+		ag.apply(&in)
+	}
 	runArgs, err := RunArgs(in)
 	if err != nil {
 		return 0, err
@@ -166,6 +177,12 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 
+	if ag != nil {
+		if err := ag.prepare(img.Ref); err != nil {
+			return 0, err
+		}
+	}
+
 	// The image is local now (built or pulled), so its PATH can be read.
 	in.ImagePath = imagePath("docker", img.Ref)
 	if runArgs, err = RunArgs(in); err != nil {
@@ -177,7 +194,12 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 	defer stop()
-	return runDocker(runArgs, o)
+	started := time.Now()
+	code, err := runDocker(runArgs, o)
+	if ag != nil && err == nil {
+		ag.finish(in, started, code, o)
+	}
+	return code, err
 }
 
 // startBroker starts this session's broker on a socket in a private

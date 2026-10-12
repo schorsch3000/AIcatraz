@@ -66,12 +66,14 @@ The first version of the door.
 **Done when:** a changed `Dockerfile.az` makes `up` ask with the diff before building; editing the Makefile from inside the container turns the next `make deploy-test` into a prompt with the correct diff; re-pinning makes it silent again; two projects with an identical Makefile pin independently; the agent can't reach the pin store.
 
 ## M5: agent entrypoints
+
+*Status: implemented. Tested with stand-in agents in real containers (config sync, persistence, discarding the agent's edits, session recording and resume for both agents), and the real installers, binaries and config locations were checked once: both agents install through the helper container, run in a Debian jail, and keep their configuration inside the mounted per-project directories. Not yet checked: a real authenticated conversation, and Claude Code's one-time "bypass permissions" confirmation in the jail.*
 - `aicatraz claude`, `aicatraz opencode`: built-in profiles for install location, config files, start command.
 - Tool cache on the host (`~/.local/share/aicatraz/tools/<tool>/<version>`) installed by a throwaway helper container, mounted read-only; `aicatraz tools update` and version pinning.
 - Config mapping: per-project state directory mounted at the agent's config path. `sync` entries are re-copied from the real config on every launch (overwriting), `persist` entries are kept.
 - Skip-permissions mode on by default, `agent.skip_permissions: false` to turn off.
 - Session tracking: per-project `sessions.json` outside the mounted home; id from `--session-id` where supported, else from a before/after diff of the agent's session store, else exit-output scrape. `aicatraz sessions` and `aicatraz resume [<id>|--pick]`, with id validation. Optional `project.id` in the config.
-- Confirm the real resume flags of the installed Claude Code and opencode versions before wiring them up.
+- Resume flags confirmed against the installed versions: Claude Code `--session-id` / `--resume`, opencode `--session` and `session list --format json`.
 
 **Done when:** after exiting `aicatraz claude`, `aicatraz resume` reopens the same conversation; the same works for opencode; `aicatraz sessions` lists both with their times; a forged or malformed id in the agent's store is rejected; moving the config with `project.id` set keeps the history; `aicatraz claude` in a fresh project starts the agent with working login and settings; editing the real settings before the next launch shows up in the jail; edits the agent made to `sync` files are gone after relaunch while its history survives; the real config directory is never mounted; the agent runs without its own permission prompts.
 

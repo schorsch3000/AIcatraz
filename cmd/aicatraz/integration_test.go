@@ -108,6 +108,7 @@ func (p *project) run(args ...string) (string, string, int) {
 		"HOME="+p.home,
 		"DOCKER_CONFIG="+realDocker,
 		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"),
+		"XDG_DATA_HOME="+filepath.Join(p.home, ".data"),
 		"XDG_RUNTIME_DIR="+p.runtime,
 	)
 	var out, errb bytes.Buffer
@@ -773,3 +774,292 @@ type syncOut struct {
 
 func (s *syncOut) write(p []byte) { s.mu.Lock(); s.b.Write(p); s.mu.Unlock() }
 func (s *syncOut) text() string   { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+// ---- coding agents ----
+
+// installFake puts a stand-in for an agent into the project's tool cache, so
+// these tests need neither network nor credentials.
+func (p *project) installFake(tool, version, script string) {
+	p.t.Helper()
+	dir := filepath.Join(p.home, ".data", "aicatraz", "tools", tool, version)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		p.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, tool), []byte(script), 0o755); err != nil {
+		p.t.Fatal(err)
+	}
+	link := filepath.Join(filepath.Dir(dir), "current")
+	os.Remove(link)
+	if err := os.Symlink(version, link); err != nil {
+		p.t.Fatal(err)
+	}
+}
+
+// aicatraz runs a subcommand with the project's environment.
+func (p *project) aicatraz(args ...string) (string, string, int) {
+	p.t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
+		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_DATA_HOME="+filepath.Join(p.home, ".data"),
+		"XDG_RUNTIME_DIR="+p.runtime)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		p.t.Fatal(err)
+	}
+	return out.String(), errb.String(), code
+}
+
+const fakeClaude = `#!/bin/sh
+echo "ARGV: $*"
+echo "CONFIG_DIR: $CLAUDE_CONFIG_DIR"
+echo "PATH: $PATH"
+echo "SETTINGS: $(cat "$CLAUDE_CONFIG_DIR/settings.json" 2>&1)"
+echo "TOPLEVEL: $(cat "$CLAUDE_CONFIG_DIR/.claude.json" 2>&1)"
+echo "SKILL: $(cat "$CLAUDE_CONFIG_DIR/skills/hello/SKILL.md" 2>&1)"
+echo "CREDMODE: $(stat -c %a "$CLAUDE_CONFIG_DIR/.credentials.json" 2>&1)"
+echo "PROJECTS: $(ls "$CLAUDE_CONFIG_DIR/projects" 2>&1 | tr '\n' ',')"
+echo "HISTORY: $(cat "$CLAUDE_CONFIG_DIR/history.jsonl" 2>&1)"
+echo "PARENT_WRITABLE: $(touch "$HOME/.writable-test" 2>&1 && echo yes)"
+# The agent changes a synced file and writes its own state.
+echo '{"evil":true}' > "$CLAUDE_CONFIG_DIR/settings.json"
+echo "line from run" >> "$CLAUDE_CONFIG_DIR/history.jsonl"
+# Record a transcript the way Claude Code does, under the id it was given.
+id=""; prev=""
+for a in "$@"; do
+  if [ "$prev" = "--session-id" ] || [ "$prev" = "--resume" ]; then id="$a"; fi
+  prev="$a"
+done
+if [ -n "$id" ] && [ -z "$NO_TRANSCRIPT" ]; then
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/-work"
+  echo '{}' > "$CLAUDE_CONFIG_DIR/projects/-work/$id.jsonl"
+fi
+exit 0
+`
+
+func TestClaudeRunsInTheJailWithYourConfig(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\n")
+	p.installFake("claude", "1.0.0", fakeClaude)
+
+	// The user's real Claude configuration.
+	real := filepath.Join(p.home, ".claude")
+	write := func(rel, content string, mode os.FileMode) {
+		path := filepath.Join(p.home, rel)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		if err := os.WriteFile(path, []byte(content), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".claude/settings.json", `{"theme":"dark"}`, 0o644)
+	write(".claude/.credentials.json", `{"token":"abc"}`, 0o600)
+	write(".claude/skills/hello/SKILL.md", "say hello", 0o644)
+	write(".claude/projects/old-secret-history/x.jsonl", "other project's transcript", 0o644)
+	write(".claude.json", `{"hasCompletedOnboarding":true}`, 0o600)
+
+	stdout, stderr, code := p.aicatraz("claude", "--approve-build", "--", "--model", "sonnet")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	for _, want := range []string{
+		"ARGV: --dangerously-skip-permissions --session-id ", "--model sonnet",
+		"CONFIG_DIR: " + real,
+		"/aicatraz/bin:/aicatraz/tools:",
+		`SETTINGS: {"theme":"dark"}`,
+		`TOPLEVEL: {"hasCompletedOnboarding":true}`,
+		"SKILL: say hello",
+		"CREDMODE: 600",
+		"PARENT_WRITABLE: yes",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("missing %q in:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "old-secret-history") {
+		t.Errorf("another project's history leaked into the jail:\n%s", stdout)
+	}
+	// What the agent did never touches the real files.
+	if b, _ := os.ReadFile(filepath.Join(real, "settings.json")); string(b) != `{"theme":"dark"}` {
+		t.Errorf("the real settings.json changed: %s", b)
+	}
+	if _, err := os.Stat(filepath.Join(real, "history.jsonl")); err == nil {
+		t.Error("the agent's history appeared in the real ~/.claude")
+	}
+
+	// The session was recorded outside the jail's reach, and the agent's own id is in it.
+	out, _, _ := p.aicatraz("sessions")
+	fields := strings.Fields(out)
+	if len(fields) < 4 || fields[2] != "claude" || len(fields[3]) != 36 {
+		t.Fatalf("sessions output: %q", out)
+	}
+	id := fields[3]
+	if !strings.Contains(stderr, id) || !strings.Contains(stderr, "aicatraz resume") {
+		t.Errorf("the session id should be announced on exit: %q", stderr)
+	}
+
+	// Second launch: your edits carry over, the agent's edits to synced files are gone,
+	// its own state (history) survived.
+	write(".claude/settings.json", `{"theme":"light"}`, 0o644)
+	stdout, stderr, code = p.aicatraz("claude", "--approve-build")
+	if code != 0 {
+		t.Fatalf("second run: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `SETTINGS: {"theme":"light"}`) {
+		t.Errorf("host change not carried over:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "HISTORY: line from run") {
+		t.Errorf("the agent's own state must persist:\n%s", stdout)
+	}
+
+	// resume continues the most recent session with the agent's own option.
+	stdout, stderr, code = p.aicatraz("resume", "--approve-build")
+	if code != 0 || !strings.Contains(stdout, "--resume ") {
+		t.Fatalf("resume: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "--session-id") {
+		t.Errorf("a resumed session must not get a new id:\n%s", stdout)
+	}
+	out, _, _ = p.aicatraz("sessions")
+	if strings.Count(out, "claude") != 2 {
+		t.Errorf("two sessions expected (the first and the second launch), got:\n%s", out)
+	}
+	// Resuming a specific id.
+	stdout, _, code = p.aicatraz("resume", id, "--approve-build")
+	if code != 0 || !strings.Contains(stdout, "--resume "+id) {
+		t.Errorf("resume by id: exit %d\n%s", code, stdout)
+	}
+	if _, stderr, code = p.aicatraz("resume", "no-such-id", "--approve-build"); code == 0 || !strings.Contains(stderr, "no recorded session") {
+		t.Errorf("unknown id: exit %d %s", code, stderr)
+	}
+}
+
+func TestSessionWithoutATranscriptIsNotRecorded(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\nagent:\n  tool: claude\n  skip_permissions: false\n")
+	p.installFake("claude", "1.0.0", "#!/bin/sh\necho \"ARGV: $*\"\n") // exits without saving anything
+	stdout, _, code := p.aicatraz("agent", "--approve-build")
+	if code != 0 || strings.Contains(stdout, "--dangerously-skip-permissions") || !strings.Contains(stdout, "--session-id") {
+		t.Fatalf("exit %d\n%s", code, stdout)
+	}
+	if out, _, _ := p.aicatraz("sessions"); !strings.Contains(out, "no sessions") {
+		t.Errorf("an empty session can't be resumed, so it must not be listed: %q", out)
+	}
+	if _, stderr, code := p.aicatraz("resume", "--approve-build"); code == 0 || !strings.Contains(stderr, "no sessions") {
+		t.Errorf("resume without sessions: exit %d %s", code, stderr)
+	}
+}
+
+const fakeOpencode = `#!/bin/sh
+if [ "$1" = session ]; then
+  now=$(date +%s)000
+  if [ -f "$HOME/.local/share/opencode/ran" ]; then
+    echo "[{\"id\":\"ses_fake1\",\"title\":\"fake work\",\"updated\":$now,\"created\":$now,\"projectId\":\"p\",\"directory\":\"$PWD\"},{\"id\":\"ses_elsewhere\",\"title\":\"x\",\"updated\":$now,\"created\":$now,\"projectId\":\"q\",\"directory\":\"/somewhere/else\"}]"
+  else
+    echo "[]"
+  fi
+  exit 0
+fi
+echo "OC_ARGV: $*"
+echo "OC_PERMISSION: $OPENCODE_PERMISSION"
+echo "OC_CONFIG: $(cat "$HOME/.config/opencode/opencode.json" 2>&1)"
+echo "OC_AUTH: $(cat "$HOME/.local/share/opencode/auth.json" 2>&1)"
+echo "OC_NODE_MODULES: $(ls "$HOME/.config/opencode/node_modules" 2>&1 | head -1)"
+echo "OC_DB: $(ls "$HOME/.local/share/opencode/" 2>&1 | tr '\n' ',')"
+echo "OC_PARENTS: $(touch "$HOME/.config/other" "$HOME/.local/other" 2>&1 && echo writable)"
+touch "$HOME/.local/share/opencode/ran"
+`
+
+func TestOpencodeRunsAndItsSessionIsFoundAfterwards(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\n")
+	p.installFake("opencode", "1.2.3", fakeOpencode)
+
+	write := func(rel, content string) {
+		path := filepath.Join(p.home, rel)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte(content), 0o600)
+	}
+	write(".config/opencode/opencode.json", `{"model":"x"}`)
+	write(".config/opencode/node_modules/dep/index.js", "huge")
+	write(".local/share/opencode/auth.json", `{"provider":"key"}`)
+	write(".local/share/opencode/opencode.db", "11 GB of every project's history")
+
+	stdout, stderr, code := p.aicatraz("opencode", "--approve-build", "--", "--model", "m")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	for _, want := range []string{
+		"OC_ARGV: --model m",
+		`OC_PERMISSION: {"*":"allow"}`,
+		`OC_CONFIG: {"model":"x"}`,
+		`OC_AUTH: {"provider":"key"}`,
+		"OC_PARENTS: writable",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("missing %q in:\n%s", want, stdout)
+		}
+	}
+	// Big or history-like host state is not copied: the jail starts with its own.
+	if strings.Contains(stdout, "opencode.db") || strings.Contains(stdout, "OC_NODE_MODULES: dep") {
+		t.Errorf("host state leaked into the jail:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "ses_fake1") {
+		t.Errorf("the session id should be announced: %q", stderr)
+	}
+	out, _, _ := p.aicatraz("sessions")
+	if !strings.Contains(out, "ses_fake1") || !strings.Contains(out, "fake work") || strings.Contains(out, "ses_elsewhere") {
+		t.Errorf("sessions: %q", out)
+	}
+	stdout, _, code = p.aicatraz("resume", "--approve-build")
+	if code != 0 || !strings.Contains(stdout, "OC_ARGV: --session ses_fake1") {
+		t.Errorf("resume: exit %d\n%s", code, stdout)
+	}
+}
+
+func TestAgentPrintShowsTheMountsWithoutInstalling(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\n")
+	stdout, stderr, code := p.aicatraz("claude", "--print", "--approve-build")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	for _, want := range []string{"target=/aicatraz/tools,readonly", "CLAUDE_CONFIG_DIR=" + filepath.Join(p.home, ".claude"), "--dangerously-skip-permissions", "<not installed yet>"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("missing %q in:\n%s", want, stdout)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(p.home, ".data")); err == nil {
+		t.Error("--print must not install or create anything")
+	}
+}
+
+func TestToolsFromHost(t *testing.T) {
+	p := newProject(t)
+	fake := t.TempDir()
+	os.WriteFile(filepath.Join(fake, "claude"), []byte("#!/bin/sh\necho '3.4.5 (Claude Code)'\n"), 0o755)
+	cmd := exec.Command(bin, "tools", "install", "claude", "--from-host")
+	cmd.Env = append(os.Environ(), "PATH="+fake+":"+os.Getenv("PATH"), "XDG_DATA_HOME="+filepath.Join(p.home, ".data"), "HOME="+p.home)
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "claude 3.4.5 installed") {
+		t.Fatalf("%v: %s", err, out)
+	}
+	list, _, _ := p.aicatraz("tools", "list")
+	if !strings.Contains(list, "* claude    3.4.5") {
+		t.Errorf("list: %q", list)
+	}
+}
+
+func TestAgentRefusesAnImageWithoutGlibc(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "image: alpine:3\nvolumes:\n  - ~/p:rw\n")
+	p.installFake("claude", "1.0.0", "#!/bin/sh\necho should-not-run\n")
+	stdout, stderr, code := p.aicatraz("claude", "--approve-build")
+	if code != 2 || strings.Contains(stdout, "should-not-run") || !strings.Contains(stderr, "glibc") {
+		t.Errorf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+}

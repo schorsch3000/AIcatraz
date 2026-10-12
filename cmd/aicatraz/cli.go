@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/schorsch3000/aicatraz/internal/agent"
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/jail"
@@ -24,6 +27,16 @@ const usage = `usage:
                                  commands and changes nothing
   aicatraz shell [-c file] [-- command...]
                                  open another shell in the running jail
+  aicatraz claude|opencode [flags] [-- agent arguments...]
+                                 start a coding agent in the jail (installed on first
+                                 use, with your configuration copied in)
+  aicatraz agent [flags] [-- agent arguments...]
+                                 start the agent named by agent.tool in the config
+  aicatraz sessions              list the agent sessions of this project
+  aicatraz resume [flags] [id] [--pick]
+                                 continue the latest (or the given) agent session
+  aicatraz tools [list | install <tool> [version] [--from-host] | update [tool...]]
+                                 manage the cached agent executables
   aicatraz config check [file]   validate a config (default: ` + defaultConfig + `)
   aicatraz version
 `
@@ -41,8 +54,24 @@ func cli(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version":
 		fmt.Fprintln(stdout, "aicatraz", version)
 		return 0
-	case "run", "up", "shell":
+	case "run", "up", "shell", "claude", "opencode", "agent", "resume":
 		return launch(args[0], args[1:], stdout, stderr)
+	case "sessions":
+		file := defaultConfig
+		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {
+			file = args[2]
+		}
+		if err := jail.ListSessions(file, stdout); err != nil {
+			fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+			return 2
+		}
+		return 0
+	case "tools":
+		if err := jail.Tools(args[1:], stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+			return 2
+		}
+		return 0
 	case approve.PromptCommand: // used inside the tmux popup
 		if len(args) == 4 {
 			secs, err := strconv.Atoi(args[3])
@@ -94,10 +123,20 @@ func configCheck(file string, stdout, stderr io.Writer) int {
 
 func launch(verb string, args []string, stdout, stderr io.Writer) int {
 	opts := jail.Options{ConfigPath: defaultConfig, Stdout: stdout, Stderr: stderr}
+	agentVerb := verb == "claude" || verb == "opencode" || verb == "agent" || verb == "resume"
+	switch verb {
+	case "claude", "opencode":
+		opts.Agent = verb
+	case "agent":
+		opts.Agent = "@config"
+	}
+	pick := false
+	var rest []string // arguments after `--`
 	for len(args) > 0 {
-		switch a := args[0]; {
+		a := args[0]
+		switch {
 		case a == "--":
-			opts.Command = args[1:]
+			rest = args[1:]
 			args = nil
 		case a == "--print":
 			opts.Print = true
@@ -111,11 +150,38 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		case a == "--approval-tty" && len(args) >= 2 && verb != "shell":
 			opts.ApprovalTTY = args[1]
 			args = args[2:]
+		case a == "--agent" && len(args) >= 2 && (verb == "run" || verb == "up"):
+			opts.Agent = args[1]
+			args = args[2:]
+		case a == "--resume" && len(args) >= 2 && (verb == "run" || verb == "up"):
+			opts.Resume = args[1]
+			args = args[2:]
+		case a == "--pick" && verb == "resume":
+			pick = true
+			args = args[1:]
+		case verb == "resume" && !strings.HasPrefix(a, "-") && opts.Resume == "":
+			opts.Resume = a // a session id
+			args = args[1:]
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
 	}
+	if opts.Agent != "" || agentVerb {
+		opts.AgentArgs = rest
+	} else {
+		opts.Command = rest
+	}
+
+	if verb == "resume" {
+		s, err := chooseSession(opts, pick, os.Stdin, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+			return 2
+		}
+		opts.Agent, opts.Resume = s.Tool, s.ID
+	}
+
 	var (
 		code int
 		err  error
@@ -124,6 +190,7 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 	case "up":
 		code, err = jail.Up(opts)
 	case "shell":
+		opts.Command = rest
 		code, err = jail.Shell(opts)
 	default:
 		code, err = jail.Launch(opts)
@@ -133,4 +200,33 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return code
+}
+
+// chooseSession finds the session `resume` continues.
+func chooseSession(opts jail.Options, pick bool, in io.Reader, stderr io.Writer) (*agent.Session, error) {
+	if !pick {
+		return jail.FindSession(opts.ConfigPath, opts.Resume)
+	}
+	var b strings.Builder
+	if err := jail.ListSessions(opts.ConfigPath, &b); err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+	for i, l := range lines {
+		fmt.Fprintf(stderr, "%2d) %s\n", i+1, l)
+	}
+	fmt.Fprint(stderr, "session number (Enter for 1): ")
+	text, _ := bufio.NewReader(in).ReadString('\n')
+	n := 1
+	if t := strings.TrimSpace(text); t != "" {
+		var err error
+		if n, err = strconv.Atoi(t); err != nil || n < 1 || n > len(lines) {
+			return nil, fmt.Errorf("not a session number: %q", t)
+		}
+	}
+	fields := strings.Fields(lines[n-1])
+	if len(fields) < 4 {
+		return nil, fmt.Errorf("no sessions recorded for this project yet")
+	}
+	return jail.FindSession(opts.ConfigPath, fields[3])
 }

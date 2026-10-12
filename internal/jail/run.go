@@ -43,6 +43,8 @@ type RunInput struct {
 	HideIsDir  map[string]bool // hidden path -> is a directory
 	SocketPath string          // the broker's socket on the host, mounted into the container
 	ImagePath  string          // the image's own PATH ("" if it has none)
+	ExtraArgs  []string        // more docker flags (an agent's mounts and environment)
+	ExtraPath  []string        // directories added to PATH after the shim directory
 }
 
 func PasswdPath(stateDir string) string { return filepath.Join(stateDir, "passwd") }
@@ -105,7 +107,7 @@ func RunArgs(in RunInput) ([]string, error) {
 		basePath = fallbackPath
 	}
 	// The shims shadow the real commands, so a call goes through the broker.
-	env = append(env, "PATH="+ContainerBinDir+":"+basePath)
+	env = append(env, "PATH="+strings.Join(append(append([]string{ContainerBinDir}, in.ExtraPath...), basePath), ":"))
 	for _, e := range env {
 		args = append(args, "-e", e)
 	}
@@ -135,6 +137,7 @@ func RunArgs(in RunInput) ([]string, error) {
 		"--mount", bind(GroupPath(in.StateDir), "/etc/group", true),
 	)
 
+	args = append(args, in.ExtraArgs...)
 	args = append(args, "-w", in.Cwd, "--entrypoint", "", in.Image)
 	if len(in.Command) == 0 {
 		return append(args, defaultShell...), nil

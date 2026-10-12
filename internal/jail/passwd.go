@@ -113,3 +113,14 @@ func imagePath(docker, image string) string {
 	}
 	return ""
 }
+
+// imageHasFile reports whether a path exists in an image, without running it.
+func imageHasFile(docker, image, file string) bool {
+	out, err := exec.Command(docker, "create", image).Output()
+	if err != nil {
+		return false
+	}
+	id := strings.TrimSpace(string(out))
+	defer exec.Command(docker, "rm", "-f", id).Run()
+	return exec.Command(docker, "cp", id+":"+file, "-").Run() == nil
+}
