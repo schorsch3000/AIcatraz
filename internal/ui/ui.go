@@ -80,20 +80,33 @@ func Strip(s string) string {
 	return b.String()
 }
 
+// Prog is the name the program was started under ("aicatraz", or its alias
+// "az"). Messages that mention a command or carry a prefix use it, so the
+// output matches what the user typed.
+var Prog = "aicatraz"
+
+// Cmd rewrites mentions of `aicatraz <verb>` in s to use Prog.
+func Cmd(s string) string {
+	if Prog == "aicatraz" {
+		return s
+	}
+	return strings.ReplaceAll(s, "`aicatraz ", "`"+Prog+" ")
+}
+
 // Error prints "aicatraz: message" with the prefix in bold red.
 func Error(w io.Writer, format string, a ...any) {
 	st := For(w)
-	fmt.Fprintf(w, "%s %s\n", st.BoldRed("aicatraz:"), fmt.Sprintf(format, a...))
+	fmt.Fprintf(w, "%s %s\n", st.BoldRed(Prog+":"), Cmd(fmt.Sprintf(format, a...)))
 }
 
 // Note prints "aicatraz: message" with a dimmed prefix.
 func Note(w io.Writer, format string, a ...any) {
 	st := For(w)
-	fmt.Fprintf(w, "%s %s\n", st.Dim("aicatraz:"), fmt.Sprintf(format, a...))
+	fmt.Fprintf(w, "%s %s\n", st.Dim(Prog+":"), Cmd(fmt.Sprintf(format, a...)))
 }
 
 // Good prints a success message: dimmed prefix, green text.
 func Good(w io.Writer, format string, a ...any) {
 	st := For(w)
-	fmt.Fprintf(w, "%s %s\n", st.Dim("aicatraz:"), st.Green(fmt.Sprintf(format, a...)))
+	fmt.Fprintf(w, "%s %s\n", st.Dim(Prog+":"), st.Green(Cmd(fmt.Sprintf(format, a...))))
 }

@@ -182,11 +182,11 @@ func RenderStyled(r Request, st ui.Style) string {
 	}
 
 	if r.Kind == KindBuild {
-		b.WriteString("\n  " + st.Bold("aicatraz: the project's build files need approval before the image is built") + "\n\n")
+		b.WriteString("\n  " + st.Bold(ui.Prog+": the project's build files need approval before the image is built") + "\n\n")
 		line("build", st.Bold(QuoteArgs(r.Name, r.Args)))
 		line("context", Quote(r.Cwd))
 	} else {
-		b.WriteString("\n  " + st.Bold("aicatraz: the agent wants to run a command ") + st.BoldRed("ON THE HOST") + "\n\n")
+		b.WriteString("\n  " + st.Bold(ui.Prog+": the agent wants to run a command ") + st.BoldRed("ON THE HOST") + "\n\n")
 		line("command", st.Bold(QuoteArgs(r.Name, r.Args)))
 		line("cwd", Quote(r.Cwd))
 		line("binary", Quote(r.Binary))

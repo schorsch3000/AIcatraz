@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/schorsch3000/aicatraz/internal/shim"
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 var version = "dev"
@@ -21,6 +22,7 @@ func main() {
 // so a rule for the Azure CLI keeps working.
 func run(name string, args []string) int {
 	if name == "aicatraz" || (name == "az" && !insideJail()) {
+		ui.Prog = name
 		return runCLI(args)
 	}
 	return runShim(name, args)

@@ -100,12 +100,12 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, st.Bold("Next:"))
 	fmt.Fprintf(stdout, "  1. edit %s to fit the project\n", examples.ConfigFile)
-	fmt.Fprintf(stdout, "  2. %s\n", st.Cyan("aicatraz config check"))
+	fmt.Fprintf(stdout, "  2. %s\n", st.Cyan(ui.Prog+" config check"))
 	switch name {
 	case "claude", "opencode":
-		fmt.Fprintf(stdout, "  3. %s   (first run: installs the agent and builds the image)\n", st.Cyan("aicatraz "+name))
+		fmt.Fprintf(stdout, "  3. %s   (first run: installs the agent and builds the image)\n", st.Cyan(ui.Prog+" "+name))
 	default:
-		fmt.Fprintf(stdout, "  3. %s\n", st.Cyan("aicatraz run"))
+		fmt.Fprintf(stdout, "  3. %s\n", st.Cyan(ui.Prog+" run"))
 	}
 	return 0
 }

@@ -243,22 +243,46 @@ func chooseSession(opts jail.Options, pick bool, in io.Reader, stderr io.Writer)
 }
 
 var (
-	usageVerb = regexp.MustCompile(`^(  aicatraz )([a-z|]+)`)
+	usageVerb = regexp.MustCompile(`^(  \S+ )([a-z|]+)`)
 	usageFlag = regexp.MustCompile(`(\s|\[)(--?[a-z][a-z-]*)`)
 )
+
+var usageGap = regexp.MustCompile(`(\S)( {2,})(\S)`)
+
+// renameUsage swaps the program name in the usage text for ui.Prog, widening
+// the description gap on a line so the descriptions stay aligned.
+func renameUsage(text string) string {
+	diff := len("aicatraz") - len(ui.Prog)
+	if diff == 0 {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "  aicatraz ") {
+			continue
+		}
+		l = "  " + ui.Prog + l[len("  aicatraz"):]
+		if diff > 0 {
+			l = usageGap.ReplaceAllString(l, "${1}${2}"+strings.Repeat(" ", diff)+"${3}")
+		}
+		lines[i] = l
+	}
+	return strings.Join(lines, "\n")
+}
 
 // styledUsage colors the usage text: command names bold cyan, flags yellow,
 // descriptions dimmed.
 func styledUsage(st ui.Style) string {
+	text := renameUsage(usage)
 	if !st.Enabled() {
-		return usage
+		return text
 	}
 	var b strings.Builder
-	for _, line := range strings.Split(strings.TrimRight(usage, "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
 		switch {
 		case line == "usage:":
 			b.WriteString(st.Bold(line))
-		case strings.HasPrefix(line, "  aicatraz "):
+		case strings.HasPrefix(line, "  "+ui.Prog+" "):
 			line = usageFlag.ReplaceAllStringFunc(line, func(m string) string {
 				return m[:1] + st.Yellow(m[1:])
 			})

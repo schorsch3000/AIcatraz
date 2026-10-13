@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/schorsch3000/aicatraz/internal/shim"
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 func write(t *testing.T, content string) string {
@@ -83,5 +84,21 @@ func TestDispatch(t *testing.T) {
 	shim.SocketPath = sock
 	if code := run("az", []string{"version"}); code == 0 {
 		t.Errorf("az inside a jail should run the shim, got the CLI")
+	}
+}
+
+func TestUsageUsesInvokedName(t *testing.T) {
+	old := ui.Prog
+	defer func() { ui.Prog = old }()
+	ui.Prog = "az"
+	out := styledUsage(ui.Style{})
+	if strings.Contains(out, "\n  aicatraz ") || !strings.Contains(out, "\n  az run ") {
+		t.Errorf("usage should name the alias:\n%s", out)
+	}
+	if !strings.Contains(out, "\n  az config check [file]         validate") {
+		t.Errorf("descriptions should stay aligned:\n%s", out)
+	}
+	if got := ui.Cmd("try `aicatraz run`"); got != "try `az run`" {
+		t.Errorf("Cmd = %q", got)
 	}
 }
