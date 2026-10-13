@@ -39,6 +39,7 @@ What it deliberately does **not** do: stop the agent from using the network (it 
 git clone <this repository> aicatraz && cd aicatraz
 make build                                   # creates bin/aicatraz
 install -m 0755 bin/aicatraz ~/.local/bin/   # or anywhere on your PATH
+ln -s aicatraz ~/.local/bin/az               # optional short alias: `az` works like `aicatraz`
 aicatraz version
 ```
 

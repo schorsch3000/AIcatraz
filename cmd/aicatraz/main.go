@@ -15,13 +15,20 @@ func main() {
 	os.Exit(run(filepath.Base(os.Args[0]), os.Args[1:]))
 }
 
-// run dispatches on the invocation name: "aicatraz" is the CLI, any other
-// name is a proxied command and runs as the shim.
+// run dispatches on the invocation name: "aicatraz" and its short alias "az"
+// are the CLI, any other name is a proxied command and runs as the shim.
+// Inside a jail (the broker socket is mounted) "az" stays a proxied command,
+// so a rule for the Azure CLI keeps working.
 func run(name string, args []string) int {
-	if name == "aicatraz" {
+	if name == "aicatraz" || (name == "az" && !insideJail()) {
 		return runCLI(args)
 	}
 	return runShim(name, args)
+}
+
+func insideJail() bool {
+	_, err := os.Stat(shim.SocketPath)
+	return err == nil
 }
 
 func runShim(name string, args []string) int {

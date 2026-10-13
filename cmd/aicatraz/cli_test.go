@@ -68,7 +68,20 @@ func TestDispatch(t *testing.T) {
 	if code := run("make", nil); code != shim.ExitUnavailable {
 		t.Errorf("shim name should run the shim, got %d", code)
 	}
+	if code := run("az", []string{"version"}); code != 0 {
+		t.Fatalf("az alias: exit %d", code)
+	}
 	if code := run("aicatraz", []string{"version"}); code != 0 {
 		t.Errorf("aicatraz name should run the CLI, got %d", code)
+	}
+
+	// With a broker socket present (inside a jail) "az" is a proxied command.
+	sock := filepath.Join(t.TempDir(), "broker.sock")
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shim.SocketPath = sock
+	if code := run("az", []string{"version"}); code == 0 {
+		t.Errorf("az inside a jail should run the shim, got the CLI")
 	}
 }
