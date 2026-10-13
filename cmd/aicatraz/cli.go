@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,8 @@ const usage = `usage:
                                  continue the latest (or the given) agent session
   aicatraz tools [list | install <tool> [version] [--from-host] | update [tool...]]
                                  manage the cached agent executables
+  aicatraz init [--example name] [--list] [--force]
+                                 write a starter ` + defaultConfig + ` (and Dockerfile.az) here
   aicatraz config check [file]   validate a config (default: ` + defaultConfig + `)
   aicatraz version
 `
@@ -55,12 +58,14 @@ func cli(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "version", "--version":
-		fmt.Fprintln(stdout, "aicatraz", version)
+		fmt.Fprintf(stdout, "aicatraz %s (%s/%s, %s)\n", version, runtime.GOOS, runtime.GOARCH, runtime.Version())
 		return 0
 	case "run", "up", "shell", "claude", "opencode", "agent", "resume":
 		return launch(args[0], args[1:], stdout, stderr)
 	case jail.CanaryCommand: // used inside the container by the hidden-path check
 		return canary.Run(args[1:], stdout)
+	case "init":
+		return runInit(args[1:], stdout, stderr)
 	case "sessions":
 		file := defaultConfig
 		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {

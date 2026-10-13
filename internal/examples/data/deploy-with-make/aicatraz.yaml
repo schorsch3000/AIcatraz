@@ -1,0 +1,28 @@
+# Build and test inside the jail; deploy from the host, with a brake.
+volumes:
+  - {{PROJECT}}:rw
+
+rules:
+  # Everyday work runs in the jail.
+  - command: make
+    args: [build, test, lint]
+    decision: local
+
+  # A deploy to the test environment runs without asking, as long as the
+  # Makefile (and what it includes) is the version you last approved. If the
+  # agent edits it, the next call asks you and shows the diff.
+  - command: make
+    args: [deploy-test]
+    decision: allow
+    depends_on: auto
+
+  # Production always asks.
+  - command: make
+    args: [deploy-prod]
+    decision: ask
+    depends_on: auto
+
+  # Everything else on the host is refused. (Without this line it would be
+  # refused anyway; the line just makes the intent visible.)
+  - command: "*"
+    decision: deny

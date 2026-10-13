@@ -1,0 +1,29 @@
+# aicatraz.yaml: describes the jail for this project.
+#
+#   aicatraz config check     check this file
+#   aicatraz run              start a shell in the jail
+#   aicatraz claude           start Claude Code in the jail (also: opencode)
+#   aicatraz up               like run, in a tmux session, so prompts can pop up
+
+# What the agent can see. Everything else on your machine is invisible to it.
+#   path:rw   read and write
+#   path:ro   read only
+#   path:hi   hidden: reads as empty (the path must exist, inside an rw/ro volume)
+volumes:
+  - {{PROJECT}}:rw
+  # - {{PROJECT}}/.env:hi        # a secret the agent must not see
+
+# Commands the agent may run on YOUR machine, outside the jail. Anything not
+# listed here can't run on the host. The first matching rule wins.
+#   allow  runs without asking
+#   ask    asks you first (a popup in tmux, or --approval-tty)
+#   local  runs the jail's own copy of the command, inside the jail
+#   deny   refuses
+# rules:
+#   - command: make
+#     args: [build, test]
+#     decision: local
+#   - command: make
+#     args: [deploy]
+#     decision: ask
+#     depends_on: auto           # notice when the Makefile changed since you last approved it

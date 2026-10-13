@@ -1,0 +1,9 @@
+# The image the jail runs in. Add whatever your project and the agent need:
+# the agent runs inside it, so tools it should use have to be installed here.
+# (Claude Code and opencode need a glibc image: Debian or Ubuntu, not Alpine.)
+FROM debian:stable-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl git make nodejs npm \
+ && rm -rf /var/lib/apt/lists/*

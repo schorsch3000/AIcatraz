@@ -1,0 +1,24 @@
+# Claude Code in a jail, with git push through you.
+#
+# Start it with `aicatraz claude`. The first run installs Claude Code, builds
+# the image from Dockerfile.az (you are asked to approve it, answer p to
+# remember), and copies your Claude settings in.
+volumes:
+  - {{PROJECT}}:rw
+
+agent:
+  tool: claude
+  skip_permissions: true   # the jail is the boundary, so Claude's own prompts are redundant
+
+rules:
+  # Pushing needs your keys, which live on the host. You are asked each time,
+  # and shown the repository's config and hooks if they changed.
+  - command: git
+    args: [push, "*"]
+    decision: ask
+    depends_on: auto
+    env_pass: [SSH_AUTH_SOCK]
+
+  # Every other git command runs in the jail.
+  - command: git
+    decision: local
