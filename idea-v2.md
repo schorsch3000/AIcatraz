@@ -275,7 +275,7 @@ agent:
 - Credentials are copied like any other synced file, so everything in the jail can read them. Settings that call host paths or commands (hooks, MCP servers) run inside the container or fail there.
 - The parent directories of the mounted roots (`~/.config`, `~/.local/share`) are created owned by the user, so tools can still write next to them.
 
-**Permission prompts.** The jail is the security boundary, so the agent's own prompts are redundant. By default the agent starts in its skip-permissions mode: `--dangerously-skip-permissions` for Claude Code, `OPENCODE_PERMISSION={"*":"allow"}` for opencode. `agent.skip_permissions: false` turns it off.
+**Permission prompts.** The jail is the security boundary, so the agent's own prompts are redundant. By default the agent starts in its skip-permissions mode: `--dangerously-skip-permissions` for Claude Code (plus `--settings {"skipDangerousModePermissionPrompt":true}`, because the flag alone makes Claude ask for a confirmation on every start; the setting is passed on the command line so your own `settings.json` is not touched), `OPENCODE_PERMISSION={"*":"allow"}` for opencode. `agent.skip_permissions: false` turns it off.
 
 **Sessions and `aicatraz resume`.** Transcripts already survive between launches. AIcatraz adds an index on top.
 - Where: `~/.local/state/aicatraz/<project>/sessions.json`, not inside the mounted directories, so the agent can't edit it. It records tool, id, title, start and end time, exit code and image.

@@ -162,7 +162,10 @@ func (p *Profile) Command(home string, o LaunchOptions) (argv []string, env map[
 		env["CLAUDE_CONFIG_DIR"] = path.Join(home, ".claude")
 		env["DISABLE_AUTOUPDATER"] = "1"
 		if o.SkipPermissions {
-			argv = append(argv, "--dangerously-skip-permissions")
+			// The flag alone still shows a confirmation dialog on every start. It is
+			// skipped when skipDangerousModePermissionPrompt is set in any settings
+			// layer; passing it on the command line leaves your settings.json alone.
+			argv = append(argv, "--dangerously-skip-permissions", "--settings", `{"skipDangerousModePermissionPrompt":true}`)
 		}
 		switch {
 		case o.Resume != "":

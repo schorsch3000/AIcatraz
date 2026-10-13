@@ -37,7 +37,7 @@ func TestClaudeCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	argv, env := p.Command("/home/u", LaunchOptions{SkipPermissions: true, SessionID: "abc-123", Args: []string{"--model", "x"}})
-	want := []string{"claude", "--dangerously-skip-permissions", "--session-id", "abc-123", "--model", "x"}
+	want := []string{"claude", "--dangerously-skip-permissions", "--settings", `{"skipDangerousModePermissionPrompt":true}`, "--session-id", "abc-123", "--model", "x"}
 	if !slices.Equal(argv, want) {
 		t.Errorf("argv %v", argv)
 	}

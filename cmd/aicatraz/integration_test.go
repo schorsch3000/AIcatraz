@@ -867,7 +867,7 @@ func TestClaudeRunsInTheJailWithYourConfig(t *testing.T) {
 		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
 	}
 	for _, want := range []string{
-		"ARGV: --dangerously-skip-permissions --session-id ", "--model sonnet",
+		`ARGV: --dangerously-skip-permissions --settings {"skipDangerousModePermissionPrompt":true} --session-id `, "--model sonnet",
 		"CONFIG_DIR: " + real,
 		"/aicatraz/bin:/aicatraz/tools:",
 		`SETTINGS: {"theme":"dark"}`,
