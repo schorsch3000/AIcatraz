@@ -84,7 +84,17 @@ Rules the launcher enforces:
 
 **Writes to a hidden file are accepted and discarded.** The file is `/dev/null` underneath, so `echo x > .env` in the jail succeeds and changes nothing. Deleting or renaming it fails with `EBUSY`.
 
-**Known weak spot for single-file hides.** A bind mount sits on a specific inode. If an editor on the host saves `.env` by writing a new file and renaming it over the old one, the name now points at a new inode, nothing is mounted over it, and the agent can read the real contents. Two defences: prefer hiding a **directory** (`.secrets/`, `config/private/`), where file replacement inside it doesn't matter; and the broker runs a canary check (inode of every `hi` file as seen from inside the container) at each command and on a timer, and freezes the session with a loud warning if one stops being hidden.
+**Known weak spot for single-file hides, and the canary that watches it.** A bind mount sits on a specific inode. If something on the host saves `.env` by writing a new file and renaming it over the old one (most editors do), the name now points at a new inode with nothing mounted over it, and the agent could read the real contents. Directories have the same problem if the directory itself is replaced. So the launcher checks **from inside the container** that every hidden path still looks hidden: a hidden file must be the `/dev/null` character device, a hidden directory must be the empty, read-only, one-block tmpfs (not just "a tmpfs": a project under `/tmp` sits on one). It checks on a timer and before every host command; a path that can't be inspected counts as exposed.
+
+If one is exposed the launcher prints a loud warning, the broker refuses everything from then on, and by default the session is **stopped** (exit code 70), because the agent may already have read the file. Editing a hidden file *in place* is fine. Settings:
+
+```yaml
+canary:
+  action: stop      # stop (default), warn (warn but keep going), or off
+  interval: 3s      # 200ms to 1h
+```
+
+Prefer hiding a **directory** (`.secrets/`) over a single file: files inside it can be saved any way you like.
 
 ### Container environment
 - `env.static`: name and value, set in the container.
@@ -163,7 +173,7 @@ rules:
 - **`deny_flags` make the rule not match** (the request then falls through to later rules and finally to the default deny). Matching leans towards "denied" when unsure: `--file`, `--file=x`, abbreviations such as `--fi`, `-f`, `-ffile` and bundled `-nf` all count as `-f`/`--file`. Exact `args` lists are the stronger tool; `deny_flags` is for broad catch-all rules.
 - `cwd` must `realpath` into a mounted volume (not into a hidden one).
 - The binary is looked up on the **broker's** `PATH` (absolute entries only) and a candidate that lives in a writable volume is skipped, so a planted `make` can't be run on the host.
-- Optional `confine_paths: true` rejects any argument that resolves outside the mounted volumes.
+- `confine_paths: true` on a rule rejects the call if any argument that is, or points to, a path resolves (symlinks followed, `~` expanded) outside the mounted volumes or into a hidden path. It looks at the argument itself and at the value of `--flag=value`; URLs are ignored; a name that exists in the working directory is checked too, since it could be a symlink to somewhere else. A path that doesn't exist yet is judged by its nearest existing ancestor.
 
 ### Dependent files: pinning what a rule really executes
 
@@ -211,6 +221,20 @@ Presets are a starting point; for commands outside the table you write the list 
 - A file in a hidden path can **not** be a dependency: the broker would otherwise read it and put its content into a prompt. Such a rule is denied.
 
 **The image build is pinned the same way.** The files that define it (`Dockerfile.az`, the ignore files, and single files named by `COPY`/`ADD`) are checked before the launcher builds. If one is new or changed, the launcher shows the diff and asks on its own terminal (the agent isn't running yet), with `y` build once, `p` build and remember, `n` cancel. Without a terminal it refuses and says so; `--approve-build` pins non-interactively. Directories copied wholesale (`COPY . /app`) are not pinned, since that is the project's own code, which the agent legitimately edits.
+
+### The linter
+
+`aicatraz config check` (and every launch) warns about rules that are valid but probably not what you meant:
+- **Shadowed rules.** A rule that an earlier rule already fully covers is never reached. It only reports what it is sure of: patterns are compared literally (or as `*`), so some shadowing goes unnoticed, but nothing is reported wrongly. A narrower rule in front of a broader one (the carve-out pattern) is fine.
+- **`command: "*"` with `allow`**, which lets the agent run any command on the host.
+- **Code runners with open arguments**: `allow` on a shell, interpreter, `env`, `xargs`, `ssh`, `find`, `sudo` and similar with no `args` (or a final `*`) is arbitrary code execution on the host. Use exact arguments or `ask`.
+- **Workspace-executing commands without `depends_on`**: `allow` on `make`, `npm`, `git`, an interpreter or `docker` runs files the agent can edit.
+- **Secret-looking `env_pass` names** on a rule that runs without asking.
+- Plus the earlier ones: `depends_on` or `env_pass` on a `local`/`deny` rule, `depends_on: auto` on a command with no preset, secret-looking `env.from_host` names.
+
+### Flow control and slow peers
+
+The wire protocol (version 2) never lets one stream block another. The shim may only send stdin up to a window the broker grants (256 KiB, topped up as the command consumes data), and the broker writes it to the command from a separate goroutine. So a command that doesn't read its stdin can't stop the broker from seeing a Ctrl-C, a heartbeat or a disconnect. A write to a peer that is slow but still sending heartbeats waits instead of failing; a silent peer fails it after the heartbeat timeout.
 
 ### Environment for proxied commands: whitelist, not blacklist
 The broker builds the env itself:

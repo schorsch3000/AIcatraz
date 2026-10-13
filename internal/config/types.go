@@ -18,6 +18,7 @@ type Config struct {
 	Env      Env       `yaml:"env"`
 	Limits   Limits    `yaml:"limits"`
 	Approval Approval  `yaml:"approval"`
+	Canary   Canary    `yaml:"canary"`
 	Global   Global    `yaml:"global"`
 	Rules    []Rule    `yaml:"rules"`
 	Agent    Agent     `yaml:"agent"`
@@ -81,6 +82,31 @@ func (a Approval) TimeoutOrDefault() time.Duration {
 		return DefaultApprovalTimeout
 	}
 	return d
+}
+
+// Canary controls the check that hidden paths are still hidden.
+type Canary struct {
+	Action   string `yaml:"action"`   // stop (default), warn or off
+	Interval string `yaml:"interval"` // how often to check, default 3s
+}
+
+// DefaultCanaryInterval is how often hidden paths are re-checked.
+const DefaultCanaryInterval = 3 * time.Second
+
+// ActionOrDefault returns what to do when a hidden path is exposed.
+func (c Canary) ActionOrDefault() string {
+	if c.Action == "" {
+		return "stop"
+	}
+	return c.Action
+}
+
+// IntervalOrDefault returns the check interval. Validation guarantees it parses.
+func (c Canary) IntervalOrDefault() time.Duration {
+	if d, err := time.ParseDuration(c.Interval); err == nil && d > 0 {
+		return d
+	}
+	return DefaultCanaryInterval
 }
 
 // Limits caps the container's resources. Zero values mean the default

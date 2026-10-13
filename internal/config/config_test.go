@@ -93,6 +93,9 @@ func TestProblems(t *testing.T) {
 		{"negative pids", "limits:\n  pids: -1\n", 2, Error, "negative"},
 		{"bad approval timeout", "approval:\n  timeout: soon\n", 2, Error, "invalid duration"},
 		{"approval timeout too short", "approval:\n  timeout: 1s\n", 2, Error, "between"},
+		{"bad canary action", "canary:\n  action: shrug\n", 2, Error, "unknown action"},
+		{"bad canary interval", "canary:\n  interval: often\n", 2, Error, "invalid duration"},
+		{"canary interval too short", "canary:\n  interval: 1ms\n", 2, Error, "between"},
 		{"bad project id", "project:\n  id: \"a b\"\n", 2, Error, "invalid project id"},
 		{"static and from_host", "env:\n  static: {A: b}\n  from_host: [A]\n", 3, Error, "both"},
 		{"secret from_host", "env:\n  from_host: [GITHUB_TOKEN]\n", 2, Warning, "looks like a secret"},
@@ -125,7 +128,14 @@ func TestProblems(t *testing.T) {
 				}
 				return
 			}
+			// Lint warnings may come first; look for the one this case is about.
 			p := ps[0]
+			for _, cand := range ps {
+				if strings.Contains(cand.Msg, tc.msg) {
+					p = cand
+					break
+				}
+			}
 			if p.Severity != tc.sev || p.Line != tc.line || !strings.Contains(p.Msg, tc.msg) {
 				t.Errorf("got line %d sev %d %q; want line %d sev %d containing %q", p.Line, p.Severity, p.Msg, tc.line, tc.sev, tc.msg)
 			}
@@ -170,5 +180,113 @@ func TestApprovalTimeout(t *testing.T) {
 	cfg, _ = Parse([]byte(""), opts)
 	if cfg.Approval.TimeoutOrDefault() != DefaultApprovalTimeout {
 		t.Error("default")
+	}
+}
+
+func lintMessages(t *testing.T, yaml string) []Problem {
+	t.Helper()
+	_, ps := Parse([]byte(yaml), opts)
+	for _, p := range ps {
+		if p.Severity == Error {
+			t.Fatalf("unexpected error: %+v", p)
+		}
+	}
+	return ps
+}
+
+func TestLintBadConfigs(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		line int
+		msg  string
+	}{
+		{"bare star allow", "rules:\n  - command: \"*\"\n    decision: allow\n", 2, "any command on the host"},
+		{"shell with open args", "rules:\n  - command: bash\n    decision: allow\n", 2, "arbitrary code execution"},
+		{"python with a final star", "rules:\n  - command: python3\n    args: [\"*\"]\n    decision: allow\n", 2, "arbitrary code execution"},
+		{"make without depends_on", "rules:\n  - command: make\n    args: [deploy]\n    decision: allow\n", 2, "depends_on: auto"},
+		{"git allow without depends_on", "rules:\n  - command: git\n    args: [status]\n    decision: allow\n", 2, "depends_on: auto"},
+		{"secret passed without asking", "rules:\n  - command: deploy\n    decision: allow\n    env_pass: [DEPLOY_TOKEN]\n", 4, "DEPLOY_TOKEN"},
+		{"shadowed by catch-all", "rules:\n  - command: \"*\"\n    decision: deny\n  - command: ls\n    decision: allow\n", 4, "never reached"},
+		{"duplicate", "rules:\n  - command: ls\n    decision: allow\n  - command: ls\n    decision: ask\n", 4, "never reached"},
+		{"shadowed by a wider args rule", "rules:\n  - command: git\n    args: [push, \"*\"]\n    decision: ask\n    depends_on: auto\n  - command: git\n    args: [push, origin]\n    decision: allow\n    depends_on: auto\n", 6, "rules[0]"},
+		{"shadowed by a glob command", "rules:\n  - command: \"py*\"\n    decision: deny\n  - command: python3\n    args: [x.py]\n    decision: allow\n    depends_on: auto\n", 4, "never reached"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ps := lintMessages(t, tc.yaml)
+			for _, p := range ps {
+				if p.Severity == Warning && p.Line == tc.line && strings.Contains(p.Msg, tc.msg) {
+					return
+				}
+			}
+			t.Errorf("no warning at line %d containing %q; got %+v", tc.line, tc.msg, ps)
+		})
+	}
+}
+
+func TestLintLeavesGoodConfigsAlone(t *testing.T) {
+	good := []string{
+		// Exact arguments and pinned files.
+		"rules:\n  - command: make\n    args: [deploy-test]\n    decision: allow\n    depends_on: auto\n",
+		// A shell is fine behind a human.
+		"rules:\n  - command: bash\n    decision: ask\n",
+		// Different arguments are not shadowed.
+		"rules:\n  - command: git\n    args: [status]\n    decision: allow\n    depends_on: auto\n  - command: git\n    args: [log]\n    decision: allow\n    depends_on: auto\n",
+		// A narrower rule in front of a broader one is how carve-outs work.
+		"rules:\n  - command: make\n    args: [deploy]\n    decision: deny\n  - command: make\n    decision: ask\n",
+		// A rule with denied flags does not cover a later rule that allows them.
+		"rules:\n  - command: make\n    args: [\"*\"]\n    deny_flags: [-f]\n    decision: ask\n    depends_on: auto\n  - command: make\n    args: [-f, x]\n    decision: ask\n    depends_on: auto\n",
+		// Exact args after an open rule that comes later.
+		"rules:\n  - command: ls\n    args: [-l]\n    decision: allow\n  - command: ls\n    decision: ask\n",
+		// An explicit catch-all deny at the end.
+		"rules:\n  - command: ls\n    decision: allow\n  - command: \"*\"\n    decision: deny\n",
+		// local commands and denies are not host code execution.
+		"rules:\n  - command: bash\n    decision: local\n  - command: make\n    decision: local\n",
+	}
+	for i, y := range good {
+		if ps := lintMessages(t, y); len(ps) != 0 {
+			t.Errorf("config %d: unexpected findings %+v\n%s", i, ps, y)
+		}
+	}
+}
+
+func TestArgsCover(t *testing.T) {
+	star := []string{"*"}
+	for _, tc := range []struct {
+		a, b []string
+		want bool
+	}{
+		{nil, nil, true},
+		{nil, []string{"x"}, true},
+		{[]string{"x"}, nil, false},
+		{star, nil, true},
+		{star, []string{"x", "y"}, true},
+		{[]string{"x"}, []string{"x"}, true},
+		{[]string{"x"}, []string{"y"}, false},
+		{[]string{"x"}, []string{"x", "y"}, false},
+		{[]string{"x", "*"}, []string{"x"}, true},
+		{[]string{"x", "*"}, []string{"x", "y", "z"}, true},
+		{[]string{"x", "*"}, []string{"y", "z"}, false},
+		{[]string{"x", "y", "*"}, []string{"x", "*"}, false}, // b also matches plain `x`
+		{[]string{"x"}, []string{"x", "*"}, false},           // b also matches `x y`
+		{[]string{"*", "b"}, []string{"a", "b"}, true},
+		{[]string{}, []string{}, true},
+		{[]string{}, []string{"x"}, false},
+	} {
+		if got := argsCover(tc.a, tc.b); got != tc.want {
+			t.Errorf("argsCover(%v, %v) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestCanaryDefaults(t *testing.T) {
+	cfg, ps := Parse([]byte(""), opts)
+	if len(ps) != 0 || cfg.Canary.ActionOrDefault() != "stop" || cfg.Canary.IntervalOrDefault() != DefaultCanaryInterval {
+		t.Fatalf("%+v %+v", ps, cfg.Canary)
+	}
+	cfg, ps = Parse([]byte("canary:\n  action: warn\n  interval: 500ms\n"), opts)
+	if len(ps) != 0 || cfg.Canary.ActionOrDefault() != "warn" || cfg.Canary.IntervalOrDefault().Milliseconds() != 500 {
+		t.Fatalf("%+v %+v", ps, cfg.Canary)
 	}
 }

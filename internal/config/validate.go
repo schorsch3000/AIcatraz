@@ -71,8 +71,10 @@ func (v *validator) validate(c *Config) {
 	v.env(c)
 	v.limits(c)
 	v.approval(c)
+	v.canary(c)
 	v.global(c)
 	v.rules(c)
+	v.lint(c)
 	v.agent(c)
 }
 
@@ -211,6 +213,23 @@ func (v *validator) approval(c *Config) {
 		v.errorf([]any{"approval", "timeout"}, "invalid duration %q (examples: 90s, 2m)", t)
 	case d < 5*time.Second || d > time.Hour:
 		v.errorf([]any{"approval", "timeout"}, "timeout must be between 5s and 1h")
+	}
+}
+
+func (v *validator) canary(c *Config) {
+	switch c.Canary.Action {
+	case "", "stop", "warn", "off":
+	default:
+		v.errorf([]any{"canary", "action"}, "unknown action %q (use stop, warn or off)", c.Canary.Action)
+	}
+	if t := c.Canary.Interval; t != "" {
+		d, err := time.ParseDuration(t)
+		switch {
+		case err != nil:
+			v.errorf([]any{"canary", "interval"}, "invalid duration %q (examples: 3s, 10s)", t)
+		case d < 200*time.Millisecond || d > time.Hour:
+			v.errorf([]any{"canary", "interval"}, "interval must be between 200ms and 1h")
+		}
 	}
 }
 

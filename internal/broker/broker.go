@@ -54,6 +54,10 @@ type Options struct {
 	Approver        approve.Approver
 	ApprovalTimeout time.Duration // default 2 minutes
 
+	// Canary, if set, is called before a command is handled; an error means a
+	// hidden path is exposed, and the broker stops serving (see Freeze).
+	Canary func() error
+
 	// Pins remembers which versions of a rule's dependent files were approved.
 	// A rule with depends_on and no store is denied rather than run unchecked.
 	Pins *pins.Store
@@ -72,6 +76,11 @@ type Broker struct {
 
 	gmu    sync.Mutex
 	grants map[string]bool // "allow for this session" keys
+
+	canary func() error // set by SetCanary; takes precedence over Options.Canary
+
+	fmu    sync.Mutex
+	frozen string // non-empty once the broker refuses everything
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -122,6 +131,10 @@ func (b *Broker) Serve(l net.Listener) error {
 	b.mu.Lock()
 	b.ln = l
 	b.mu.Unlock()
+	if b.ctx.Err() != nil { // Close came first
+		l.Close()
+		return nil
+	}
 	for {
 		c, err := l.Accept()
 		if err != nil {
@@ -136,6 +149,40 @@ func (b *Broker) Serve(l net.Listener) error {
 			b.handle(c)
 		}()
 	}
+}
+
+// SetCanary installs the hidden-path check. It must be called before the
+// broker serves requests it should apply to.
+func (b *Broker) SetCanary(f func() error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.canary = f
+}
+
+func (b *Broker) canaryFunc() func() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.canary != nil {
+		return b.canary
+	}
+	return b.opts.Canary
+}
+
+// Freeze makes the broker refuse every request from now on. It is used when a
+// hidden path was exposed: nothing more should happen on the host on behalf of
+// an agent that may have seen a secret.
+func (b *Broker) Freeze(reason string) {
+	b.fmu.Lock()
+	defer b.fmu.Unlock()
+	if b.frozen == "" {
+		b.frozen = reason
+	}
+}
+
+func (b *Broker) frozenReason() string {
+	b.fmu.Lock()
+	defer b.fmu.Unlock()
+	return b.frozen
 }
 
 // Close stops accepting, terminates running commands and waits for them.
@@ -202,6 +249,10 @@ func (b *Broker) handle(nc net.Conn) {
 		deny(err.Error())
 		return
 	}
+	if reason := b.frozenReason(); reason != "" {
+		deny("the session is frozen: " + reason)
+		return
+	}
 	d := b.pol.Decide(h.Name, h.Args)
 	if d.Rule != policy.NoRule {
 		r := d.Rule
@@ -224,10 +275,24 @@ func (b *Broker) handle(nc net.Conn) {
 		return
 	}
 
+	if check := b.canaryFunc(); check != nil {
+		if err := check(); err != nil {
+			b.Freeze(err.Error())
+			deny("the session is frozen: " + err.Error())
+			return
+		}
+	}
+
 	cwd, err := b.checkCwd(h.Cwd)
 	if err != nil {
 		deny(err.Error())
 		return
+	}
+	if d.Config != nil && d.Config.ConfinePaths {
+		if err := b.confineArgs(h.Args, cwd); err != nil {
+			deny(err.Error())
+			return
+		}
 	}
 	bin, err := resolveBinary(h.Name, pathOf(b.opts.HostEnv), b.writable)
 	if err != nil {
@@ -397,6 +462,10 @@ func (b *Broker) execute(conn *proto.Conn, in <-chan frame, h *proto.Hello, bin,
 	pgid := cmd.Process.Pid // both modes make the command a group leader
 	killGroup := func(sig syscall.Signal) { _ = syscall.Kill(-pgid, sig) }
 
+	q := newStdinQueue(conn, stdin)
+	q.start()
+	defer q.close()
+
 	gone := make(chan struct{}) // the client vanished or timed out
 	go func() {
 		defer close(gone)
@@ -406,9 +475,11 @@ func (b *Broker) execute(conn *proto.Conn, in <-chan frame, h *proto.Hello, bin,
 			}
 			switch f.t {
 			case proto.TStdin:
-				_, _ = stdin.Write(f.p)
+				if !q.push(f.p) {
+					return // more than it was granted: end the session
+				}
 			case proto.TStdinEOF:
-				_ = stdin.Close()
+				q.end()
 			case proto.TSignal:
 				if len(f.p) == 1 && forwardable(syscall.Signal(f.p[0])) {
 					killGroup(syscall.Signal(f.p[0]))

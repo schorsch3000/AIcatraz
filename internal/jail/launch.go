@@ -190,13 +190,35 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 
-	stop, err := startBroker(cfg, state, runBase, runDir, id, uid, store, chooseApprover(cfg, o, runDir), o.Stderr)
+	var w *watcher
+	hook := func(b *broker.Broker) {
+		if cfg.Canary.ActionOrDefault() == "off" || len(hideIsDir) == 0 {
+			return
+		}
+		w = newWatcher(in.Name, hideIsDir, cfg.Canary.ActionOrDefault(), cfg.Canary.IntervalOrDefault(), b, o.Stderr)
+	}
+	b, stop, err := startBroker(cfg, state, runBase, runDir, id, uid, store, chooseApprover(cfg, o, runDir), o.Stderr, hook)
 	if err != nil {
 		return 0, err
 	}
 	defer stop()
+	stopWatch := make(chan struct{})
+	if w != nil {
+		b.SetCanary(func() error {
+			err := w.check()
+			if err != nil {
+				w.trip(err) // a request that finds the problem ends the session, not just the request
+			}
+			return err
+		})
+		go w.run(stopWatch)
+	}
 	started := time.Now()
 	code, err := runDocker(runArgs, o)
+	close(stopWatch)
+	if w != nil && w.wasTripped() {
+		return ExitExposed, nil
+	}
 	if ag != nil && err == nil {
 		ag.finish(in, started, code, o)
 	}
@@ -205,14 +227,14 @@ func Launch(o Options) (int, error) {
 
 // startBroker starts this session's broker on a socket in a private
 // directory and returns a function that stops it and removes the socket.
-func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int, store *pins.Store, approver approve.Approver, stderr io.Writer) (func(), error) {
+func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int, store *pins.Store, approver approve.Approver, stderr io.Writer, hook func(*broker.Broker)) (*broker.Broker, func(), error) {
 	cleanStaleRunDirs(runBase)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	audit, err := broker.OpenAudit(filepath.Join(state, "audit.log"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	b, err := broker.New(cfg, broker.Options{
 		UID:      uid,
@@ -223,18 +245,21 @@ func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int,
 		Pins:     store,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	l, err := net.Listen("unix", filepath.Join(runDir, "broker.sock"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	go func() {
 		if err := b.Serve(l); err != nil {
 			ui.Error(stderr, "broker stopped: %v", err)
 		}
 	}()
-	return func() {
+	if hook != nil {
+		hook(b)
+	}
+	return b, func() {
 		b.Close()
 		audit.Close()
 		os.RemoveAll(runDir)

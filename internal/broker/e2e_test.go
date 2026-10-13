@@ -3,12 +3,16 @@ package broker_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"hash"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1160,5 +1164,390 @@ func TestDependsOnWithoutAPinStoreFailsClosed(t *testing.T) {
 	r := e.run("", "cat", "data.txt")
 	if r.code != shim.ExitDenied || !strings.Contains(r.stderr, "pin store") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+// ---- confine_paths ----
+
+const confineRules = `
+rules:
+  - command: cat
+    args: ["*"]
+    decision: allow
+    confine_paths: true
+`
+
+func TestConfinePaths(t *testing.T) {
+	e := setup(t, confineRules)
+	e.writeFile("data.txt", "inside\n")
+	e.writeFile("sub/deep.txt", "deep\n")
+	os.Symlink("/etc/hostname", filepath.Join(e.dir, "link-out"))
+	os.Symlink(filepath.Join(e.dir, "data.txt"), filepath.Join(e.dir, "link-in"))
+	os.Symlink("/", filepath.Join(e.dir, "rootlink"))
+
+	allowed := [][]string{
+		{"data.txt"},
+		{"./data.txt"},
+		{"sub/deep.txt"},
+		{"sub/../data.txt"},
+		{"link-in"},
+		{"-n", "data.txt"},
+		{"new/dir/not-yet.txt"}, // does not exist, but would be inside
+		{"https://example.com/a/b"},
+		{"origin/main"}, // looks like a ref; resolves inside the workspace
+		{e.dir + "/data.txt"},
+	}
+	for _, args := range allowed {
+		r := e.run("", "cat", args...)
+		if r.code == shim.ExitDenied && strings.Contains(r.stderr, "volumes") {
+			t.Errorf("%v must be allowed: %s", args, r.stderr)
+		}
+	}
+	if r := e.run("", "cat", "data.txt"); r.stdout != "inside\n" {
+		t.Errorf("the allowed call must really run: %+v", r)
+	}
+
+	denied := [][]string{
+		{"/etc/passwd"},
+		{"../outside.txt"},
+		{"sub/../../outside.txt"},
+		{"link-out"},                 // a symlink pointing out
+		{"rootlink/etc/passwd"},      // a symlinked directory pointing out
+		{"--file=/etc/passwd"},       // value of a flag
+		{"-f", "data.txt", "/tmp/x"}, // one bad argument among good ones
+		{"~/secret"},
+		{"/"},
+		{".."},
+	}
+	for _, args := range denied {
+		r := e.run("", "cat", args...)
+		if r.code != shim.ExitDenied || !strings.Contains(r.stderr, "outside the mounted volumes") {
+			t.Errorf("%v must be denied: %+v", args, r)
+		}
+	}
+	// Nothing denied reached the host command.
+	for _, en := range e.auditEntries() {
+		if en.Event == "exit" && len(en.Args) > 0 && (en.Args[0] == "/etc/passwd" || en.Args[0] == "link-out") {
+			t.Errorf("a confined call ran: %+v", en)
+		}
+	}
+}
+
+func TestConfinePathsRefusesHiddenPaths(t *testing.T) {
+	root, _ := os.MkdirTemp("", "bk")
+	defer os.RemoveAll(root)
+	work := filepath.Join(root, "w")
+	os.MkdirAll(work, 0o755)
+	os.WriteFile(filepath.Join(work, ".env"), []byte("SECRET=1\n"), 0o644)
+	cfg, ps := config.Parse([]byte("volumes:\n  - "+work+":rw\n  - "+work+"/.env:hi\n"+confineRules), config.Options{Home: "/home/nobody"})
+	if config.HasErrors(ps) {
+		t.Fatal(ps)
+	}
+	b, err := broker.New(cfg, broker.Options{UID: os.Getuid(), HostEnv: os.Environ()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(root, "s")
+	l, _ := net.Listen("unix", sock)
+	go b.Serve(l)
+	defer b.Close()
+	cmd := exec.Command(os.Args[0], ".env")
+	cmd.Dir = work
+	cmd.Env = []string{"AICATRAZ_TEST_SHIM=cat", "AICATRAZ_TEST_SOCK=" + sock}
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if code := exitCode(t, cmd.Run()); code != shim.ExitDenied || strings.Contains(out.String(), "SECRET") || !strings.Contains(errb.String(), "hidden") {
+		t.Fatalf("code %d out %q err %q", code, out.String(), errb.String())
+	}
+}
+
+// ---- stress and teardown ----
+
+func openFDs() int {
+	entries, _ := os.ReadDir("/proc/self/fd")
+	return len(entries)
+}
+
+// hostProcessesWith counts processes whose command line contains marker.
+func hostProcessesWith(marker string) int {
+	n := 0
+	entries, _ := os.ReadDir("/proc")
+	for _, e := range entries {
+		if _, err := strconv.Atoi(e.Name()); err != nil {
+			continue
+		}
+		cmdline, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
+		if err == nil && strings.Contains(string(cmdline), marker) {
+			if st, _ := os.ReadFile("/proc/" + e.Name() + "/stat"); !strings.Contains(string(st), ") Z ") {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func TestManyConcurrentCommands(t *testing.T) {
+	e := setup(t, allowAll, func(o *broker.Options) { o.MaxConcurrent = 8 })
+	const total = 40
+	type res struct {
+		r   result
+		arg string
+	}
+	results := make(chan res, total)
+	var wg sync.WaitGroup
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			arg := fmt.Sprintf("n%d", i)
+			results <- res{e.run("", "sh", "-c", "sleep 0.3; echo "+arg), arg}
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	ran, refused := 0, 0
+	for x := range results {
+		switch {
+		case x.r.code == 0 && x.r.stdout == x.arg+"\n":
+			ran++
+		case x.r.code == shim.ExitDenied && strings.Contains(x.r.stderr, "too many"):
+			refused++
+		default:
+			t.Errorf("%s: neither run nor cleanly refused: %+v", x.arg, x.r)
+		}
+	}
+	if ran < 8 || ran+refused != total {
+		t.Errorf("ran %d, refused %d of %d", ran, refused, total)
+	}
+	if refused == 0 {
+		t.Errorf("40 overlapping 300ms commands against a limit of 8 should have been refused in part")
+	}
+	// The limit is a ceiling, not a leak: afterwards everything runs again.
+	if r := e.run("", "echo", "after"); r.code != 0 || r.stdout != "after\n" {
+		t.Errorf("broker not usable after the burst: %+v", r)
+	}
+}
+
+func TestHugeStdinAndStdout(t *testing.T) {
+	e := setup(t, allowAll)
+	const size = 64 << 20
+	cmd := e.shimCmd("cat")
+	var out sha256Writer
+	cmd.Stdout = &out
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.New()
+	chunk := bytes.Repeat([]byte("0123456789abcdef"), 4096) // 64 KiB
+	go func() {
+		for sent := 0; sent < size; sent += len(chunk) {
+			want.Write(chunk)
+			if _, err := in.Write(chunk); err != nil {
+				return
+			}
+		}
+		in.Close()
+	}()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if exitCode(t, err) != 0 {
+			t.Fatalf("%v: %s", err, errb.String())
+		}
+	case <-time.After(90 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("64 MB did not make it through in time")
+	}
+	if out.n != size || !bytes.Equal(out.sum(), want.Sum(nil)) {
+		t.Errorf("data corrupted or truncated: %d bytes back, want %d", out.n, size)
+	}
+}
+
+type sha256Writer struct {
+	h hash.Hash
+	n int
+}
+
+func (w *sha256Writer) Write(p []byte) (int, error) {
+	if w.h == nil {
+		w.h = sha256.New()
+	}
+	w.n += len(p)
+	return w.h.Write(p)
+}
+
+func (w *sha256Writer) sum() []byte { return w.h.Sum(nil) }
+
+func TestAbruptDisconnectsLeakNothing(t *testing.T) {
+	e := setup(t, allowAll)
+	baseFDs := openFDs()
+	const rounds = 25
+	marker := "61.4242"
+	for i := 0; i < rounds; i++ {
+		c := e.shimCmd("sh", "-c", "sleep "+marker+" & wait")
+		if i%2 == 0 {
+			c.Stdin = strings.NewReader(strings.Repeat("x", 100000)) // data in flight when it dies
+		}
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(30 * time.Millisecond) // sometimes before the broker started the command, sometimes after
+		c.Process.Kill()
+		c.Wait()
+	}
+	deadline := time.Now().Add(6 * time.Second)
+	for hostProcessesWith("sleep\x00"+marker) != 0 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if n := hostProcessesWith("sleep\x00" + marker); n != 0 {
+		ps, _ := exec.Command("ps", "-eo", "pid,ppid,pgid,stat,args", "--sort=pid").Output()
+		var lines []string
+		for _, l := range strings.Split(string(ps), "\n") {
+			if strings.Contains(l, marker) {
+				lines = append(lines, l)
+			}
+		}
+		t.Fatalf("%d host processes survived their client:\n%s", n, strings.Join(lines, "\n"))
+	}
+	// The broker must still work, and not hold on to descriptors.
+	if r := e.run("", "echo", "alive"); r.code != 0 || r.stdout != "alive\n" {
+		t.Fatalf("%+v", r)
+	}
+	waitFor(t, "descriptors to be released", func() bool { return openFDs() <= baseFDs+6 })
+}
+
+func TestBrokerCloseWaitsForCommandsAndLeavesNothing(t *testing.T) {
+	e := setup(t, allowAll)
+	marker := "62.4343"
+	var procs []*exec.Cmd
+	for i := 0; i < 5; i++ {
+		c := e.shimCmd("sh", "-c", "sleep "+marker+"; echo never")
+		var out bytes.Buffer
+		c.Stdout = &out
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		procs = append(procs, c)
+	}
+	waitFor(t, "commands to start", func() bool { return hostProcessesWith("sleep\x00"+marker) == 5 })
+	done := make(chan struct{})
+	go func() { e.b.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Close hung")
+	}
+	for _, c := range procs {
+		c.Wait()
+	}
+	if n := hostProcessesWith("sleep\x00" + marker); n != 0 {
+		t.Errorf("%d host processes left after Close", n)
+	}
+}
+
+func TestBrokerRestart(t *testing.T) {
+	// A shim that starts while the broker is down gets through once it is back.
+	e := setup(t, allowAll)
+	e.b.Close() // takes the listener, and its socket, away
+
+	shimc := e.shimCmd("echo", "after-restart")
+	var out, errb bytes.Buffer
+	shimc.Stdout, shimc.Stderr = &out, &errb
+	if err := shimc.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond) // the shim is retrying with backoff
+
+	cfg, ps := config.Parse([]byte("volumes:\n  - "+e.dir+":rw\n"+allowAll), config.Options{Home: "/home/nobody"})
+	if config.HasErrors(ps) {
+		t.Fatal(ps)
+	}
+	b2, err := broker.New(cfg, broker.Options{UID: os.Getuid(), HostEnv: os.Environ()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("unix", e.sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go b2.Serve(l)
+	defer b2.Close()
+
+	if code := exitCode(t, shimc.Wait()); code != 0 || out.String() != "after-restart\n" {
+		t.Fatalf("code %d out %q err %q", code, out.String(), errb.String())
+	}
+}
+
+func TestNoGoroutineLeakAfterManyRequests(t *testing.T) {
+	e := setup(t, allowAll)
+	e.run("", "echo", "warm up")
+	time.Sleep(200 * time.Millisecond)
+	base := runtime.NumGoroutine()
+	for i := 0; i < 60; i++ {
+		e.run("", "echo", "x")
+	}
+	waitFor(t, "goroutines to settle", func() bool { return runtime.NumGoroutine() <= base+4 })
+}
+
+func TestSignalsGetThroughWhileStdinIsBackedUp(t *testing.T) {
+	// The command never reads its stdin, and the client keeps sending it. That
+	// must not stop a Ctrl-C (SIGTERM here) from reaching the command.
+	e := setup(t, allowAll)
+	cmd := e.shimCmd("sh", "-c", "sleep 60")
+	cmd.Stdin = strings.NewReader(strings.Repeat("x", 4<<20))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the command to start", func() bool { return len(e.auditEntries()) >= 1 })
+	time.Sleep(500 * time.Millisecond) // the pipe is full by now
+	cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if code := exitCode(t, err); code != 128+int(syscall.SIGTERM) {
+			t.Errorf("exit code %d, want 143", code)
+		}
+	case <-time.After(8 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("the signal was stuck behind the stdin data")
+	}
+}
+
+func TestSlowOutputConsumerIsNotKilled(t *testing.T) {
+	// Heartbeat timeout is 600ms in these tests. A consumer that doesn't read the
+	// output for 2s is slow, not dead, and must get all of it.
+	e := setup(t, allowAll)
+	cmd := e.shimCmd("sh", "-c", "head -c 20000000 /dev/zero")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+	n, err := io.Copy(io.Discard, out)
+	if err != nil || n != 20000000 {
+		t.Fatalf("got %d bytes, err %v", n, err)
+	}
+	if code := exitCode(t, cmd.Wait()); code != 0 {
+		t.Errorf("exit %d", code)
+	}
+}
+
+func TestStdinFlowControlDeliversEverythingToASlowReader(t *testing.T) {
+	e := setup(t, allowAll)
+	data := strings.Repeat("0123456789", 100000) // 1 MB, many times the window
+	r := e.run(data, "sh", "-c", "sleep 1; cat") // the command starts reading late
+	if r.code != 0 || r.stdout != data {
+		t.Fatalf("code %d, %d bytes back of %d", r.code, len(r.stdout), len(data))
 	}
 }

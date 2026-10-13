@@ -12,6 +12,7 @@ import (
 
 	"github.com/schorsch3000/aicatraz/internal/agent"
 	"github.com/schorsch3000/aicatraz/internal/approve"
+	"github.com/schorsch3000/aicatraz/internal/canary"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/jail"
 	"github.com/schorsch3000/aicatraz/internal/ui"
@@ -58,6 +59,8 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "run", "up", "shell", "claude", "opencode", "agent", "resume":
 		return launch(args[0], args[1:], stdout, stderr)
+	case jail.CanaryCommand: // used inside the container by the hidden-path check
+		return canary.Run(args[1:], stdout)
 	case "sessions":
 		file := defaultConfig
 		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {

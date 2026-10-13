@@ -78,6 +78,8 @@ The first version of the door.
 **Done when:** after exiting `aicatraz claude`, `aicatraz resume` reopens the same conversation; the same works for opencode; `aicatraz sessions` lists both with their times; a forged or malformed id in the agent's store is rejected; moving the config with `project.id` set keeps the history; `aicatraz claude` in a fresh project starts the agent with working login and settings; editing the real settings before the next launch shows up in the jail; edits the agent made to `sync` files are gone after relaunch while its history survives; the real config directory is never mounted; the agent runs without its own permission prompts.
 
 ## M6: hardening and robustness
+
+*Status: implemented. The canary is tested against real containers (rename over a hidden file, a replaced hidden directory, an in-place edit that must not alarm, the per-command check, switching it off). The stress tests found and fixed a real bug: a command that doesn't read its stdin, with a client that sends a lot of it, froze the broker's reader, so a disconnect or Ctrl-C was never noticed and the host process leaked. Stdin now uses credit-based flow control (protocol version 2).*
 - Canary check for `hi` files (inode seen from inside the container, per command and on a timer), session frozen with a warning if one is exposed.
 - Config linter: shadowed rules, bare `*` with `allow`, workspace-executing commands without `depends_on`.
 - `confine_paths`, `realpath` checks on cwd.

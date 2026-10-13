@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1061,5 +1063,222 @@ func TestAgentRefusesAnImageWithoutGlibc(t *testing.T) {
 	stdout, stderr, code := p.aicatraz("claude", "--approve-build")
 	if code != 2 || strings.Contains(stdout, "should-not-run") || !strings.Contains(stderr, "glibc") {
 		t.Errorf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+}
+
+// ---- hidden-path canary ----
+
+// startRun starts `aicatraz run -- args` in the background.
+func (p *project) startRun(args ...string) (*exec.Cmd, *syncOut) {
+	p.t.Helper()
+	cmd := exec.Command(bin, append(p.runArgs(), args...)...)
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
+		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_DATA_HOME="+filepath.Join(p.home, ".data"),
+		"XDG_RUNTIME_DIR="+p.runtime)
+	var out syncOut
+	cmd.Stdout = writerFunc(out.write)
+	cmd.Stderr = writerFunc(out.write)
+	if err := cmd.Start(); err != nil {
+		p.t.Fatal(err)
+	}
+	return cmd, &out
+}
+
+type writerFunc func([]byte)
+
+func (f writerFunc) Write(b []byte) (int, error) { f(b); return len(b), nil }
+
+func waitContainer(t *testing.T, projectID string) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := exec.Command("docker", "ps", "-q", "--filter", "label=aicatraz.project="+projectID).Output()
+		if strings.TrimSpace(string(out)) != "" {
+			time.Sleep(700 * time.Millisecond) // let the command inside start
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("the jail did not start")
+}
+
+func waitExit(t *testing.T, cmd *exec.Cmd, d time.Duration) int {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode()
+		}
+		return 0
+	case <-time.After(d):
+		cmd.Process.Kill()
+		t.Fatal("the launcher did not exit in time")
+		return -1
+	}
+}
+
+func containersFor(projectID string) int {
+	out, _ := exec.Command("docker", "ps", "-q", "--filter", "label=aicatraz.project="+projectID).Output()
+	return len(strings.Fields(string(out)))
+}
+
+const canaryConfig = `
+project: {id: %s}
+volumes:
+  - ~/p:rw
+  - ~/p/.env:hi
+  - ~/p/secrets:hi
+canary:
+  interval: %s
+rules:
+  - command: hostname
+    decision: allow
+`
+
+func newCanaryProject(t *testing.T, id, interval string) *project {
+	p := newProject(t)
+	p.write(".env", "SECRET=1\n")
+	p.write("secrets/key", "top secret\n")
+	p.write("aicatraz.yaml", fmt.Sprintf(canaryConfig, id, interval))
+	return p
+}
+
+func TestRenameOverAHiddenFileEndsTheSession(t *testing.T) {
+	p := newCanaryProject(t, "it-canary-file", "500ms")
+	cmd, out := p.startRun("sleep", "60")
+	waitContainer(t, "it-canary-file")
+
+	// What most editors do when saving: write a new file and rename it over the old one.
+	os.WriteFile(filepath.Join(p.dir, ".env.new"), []byte("SECRET=2\n"), 0o600)
+	if err := os.Rename(filepath.Join(p.dir, ".env.new"), filepath.Join(p.dir, ".env")); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := waitExit(t, cmd, 30*time.Second); code != 70 {
+		t.Errorf("exit code %d, want 70\n%s", code, out.text())
+	}
+	for _, want := range []string{"no longer hidden", ".env", "stopped"} {
+		if !strings.Contains(out.text(), want) {
+			t.Errorf("warning lacks %q:\n%s", want, out.text())
+		}
+	}
+	if n := containersFor("it-canary-file"); n != 0 {
+		t.Errorf("%d containers still running", n)
+	}
+}
+
+func TestReplacedHiddenDirectoryIsDetected(t *testing.T) {
+	p := newCanaryProject(t, "it-canary-dir", "500ms")
+	cmd, out := p.startRun("sleep", "60")
+	waitContainer(t, "it-canary-dir")
+
+	os.RemoveAll(filepath.Join(p.dir, "secrets"))
+	os.MkdirAll(filepath.Join(p.dir, "secrets"), 0o755)
+	os.WriteFile(filepath.Join(p.dir, "secrets", "key"), []byte("new\n"), 0o600)
+
+	if code := waitExit(t, cmd, 30*time.Second); code != 70 || !strings.Contains(out.text(), "secrets") {
+		t.Errorf("exit %d\n%s", code, out.text())
+	}
+}
+
+func TestEditingAHiddenFileInPlaceIsFine(t *testing.T) {
+	p := newCanaryProject(t, "it-canary-inplace", "300ms")
+	cmd, out := p.startRun("sleep", "6")
+	waitContainer(t, "it-canary-inplace")
+
+	// Same inode, new content: the mount still covers it.
+	f, err := os.OpenFile(filepath.Join(p.dir, ".env"), os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("SECRET=changed\n")
+	f.Close()
+
+	if code := waitExit(t, cmd, 40*time.Second); code != 0 {
+		t.Errorf("an in-place edit must not end the session: exit %d\n%s", code, out.text())
+	}
+	if strings.Contains(out.text(), "no longer hidden") {
+		t.Errorf("false alarm:\n%s", out.text())
+	}
+}
+
+func TestHostCommandAfterExposureIsRefused(t *testing.T) {
+	// The timer is an hour away: only the per-command check can notice.
+	p := newCanaryProject(t, "it-canary-cmd", "1h")
+	cmd, out := p.startRun("sh", "-c", "sleep 3; hostname; echo reached-the-end")
+	waitContainer(t, "it-canary-cmd")
+
+	os.WriteFile(filepath.Join(p.dir, ".env.new"), []byte("x\n"), 0o600)
+	os.Rename(filepath.Join(p.dir, ".env.new"), filepath.Join(p.dir, ".env"))
+
+	code := waitExit(t, cmd, 40*time.Second)
+	hostName, _ := os.Hostname()
+	if code != 70 || strings.Contains(out.text(), hostName+"\n") && !strings.Contains(out.text(), "no longer hidden") {
+		t.Errorf("exit %d\n%s", code, out.text())
+	}
+	if !strings.Contains(out.text(), "no longer hidden") || strings.Contains(out.text(), "reached-the-end") {
+		t.Errorf("the host command must not run, and the session must end:\n%s", out.text())
+	}
+}
+
+func TestCanaryCanBeSwitchedOff(t *testing.T) {
+	p := newCanaryProject(t, "it-canary-off", "300ms")
+	p.write("aicatraz.yaml", strings.Replace(fmt.Sprintf(canaryConfig, "it-canary-off", "300ms"), "canary:\n", "canary:\n  action: off\n", 1))
+	cmd, out := p.startRun("sleep", "4")
+	waitContainer(t, "it-canary-off")
+	os.WriteFile(filepath.Join(p.dir, ".env.new"), []byte("x\n"), 0o600)
+	os.Rename(filepath.Join(p.dir, ".env.new"), filepath.Join(p.dir, ".env"))
+	if code := waitExit(t, cmd, 40*time.Second); code != 0 {
+		t.Errorf("exit %d\n%s", code, out.text())
+	}
+}
+
+// ---- teardown ----
+
+func TestLauncherSignalsLeaveNothingBehind(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
+		t.Run(sig.String(), func(t *testing.T) {
+			id := "it-teardown-" + strings.ToLower(sig.String()[:4])
+			p := newProject(t)
+			p.write("aicatraz.yaml", "project: {id: "+id+"}\nvolumes:\n  - ~/p:rw\nrules:\n  - command: hostname\n    decision: allow\n")
+			cmd, out := p.startRun("sleep", "120")
+			waitContainer(t, id)
+			if ents, _ := os.ReadDir(filepath.Join(p.runtime, "aicatraz")); len(ents) != 1 {
+				t.Fatalf("expected one session directory while running: %v", ents)
+			}
+			cmd.Process.Signal(sig)
+			waitExit(t, cmd, 60*time.Second)
+
+			if n := containersFor(id); n != 0 {
+				t.Errorf("%d containers left running\n%s", n, out.text())
+			}
+			if ents, _ := os.ReadDir(filepath.Join(p.runtime, "aicatraz")); len(ents) != 0 {
+				t.Errorf("session directory (with the broker socket) left behind: %v", ents)
+			}
+		})
+	}
+}
+
+func TestStaleSessionDirectoriesAreCleanedUp(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\n")
+	// A launcher that was killed with SIGKILL can't clean up after itself.
+	stale := filepath.Join(p.runtime, "aicatraz", "999999") // no such process
+	os.MkdirAll(stale, 0o700)
+	os.WriteFile(filepath.Join(stale, "broker.sock"), nil, 0o600)
+	alive := filepath.Join(p.runtime, "aicatraz", strconv.Itoa(os.Getpid())) // this test process is alive
+	os.MkdirAll(alive, 0o700)
+
+	if _, stderr, code := p.run("true"); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if _, err := os.Stat(stale); err == nil {
+		t.Error("the directory of a dead launcher must be removed")
+	}
+	if _, err := os.Stat(alive); err != nil {
+		t.Error("the directory of a live process must be left alone")
 	}
 }

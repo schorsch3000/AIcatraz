@@ -177,14 +177,25 @@ func stream(conn *proto.Conn, std IO, tty bool) int {
 		}
 	}()
 
+	// stdin is only sent as far as the broker has granted credit for, so a
+	// command that doesn't read it can't make this connection back up.
+	credit := proto.NewCredit()
+	defer credit.Close()
 	go func() {
 		buf := make([]byte, proto.ChunkSize)
 		for {
-			n, err := std.Stdin.Read(buf)
-			if n > 0 {
-				if conn.Write(proto.TStdin, buf[:n]) != nil {
+			n := credit.Take(len(buf))
+			if n == 0 {
+				return
+			}
+			m, err := std.Stdin.Read(buf[:n])
+			if m > 0 {
+				if conn.Write(proto.TStdin, buf[:m]) != nil {
 					return
 				}
+			}
+			if m < n {
+				credit.Add(n - m) // unused credit goes back
 			}
 			if err != nil {
 				conn.Write(proto.TStdinEOF, nil)
@@ -207,6 +218,10 @@ func stream(conn *proto.Conn, std IO, tty bool) int {
 			std.Stdout.Write(p)
 		case proto.TStderr:
 			std.Stderr.Write(p)
+		case proto.TWindow:
+			if n, ok := proto.ParseWindow(p); ok {
+				credit.Add(int(n))
+			}
 		case proto.TExit:
 			var e proto.Exit
 			if err := json.Unmarshal(p, &e); err != nil {
