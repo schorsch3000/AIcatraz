@@ -179,3 +179,7 @@ make release-check    # builds twice, in different directories, and compares the
 ```
 
 Builds use `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false` and no build id, so the same source and the same Go toolchain give byte-identical binaries. To verify a release: check out the tag, run `make release` with the Go version shown by `aicatraz version`, and compare `dist/SHA256SUMS`. `make release` refuses to run on a tree with uncommitted changes.
+
+## License
+
+AIcatraz is free software under the GNU General Public License, version 3. See [LICENSE](LICENSE).
