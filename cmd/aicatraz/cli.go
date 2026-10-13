@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/jail"
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 const defaultConfig = "aicatraz.yaml"
@@ -47,7 +49,7 @@ func runCLI(args []string) int {
 
 func cli(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
+		fmt.Fprint(stderr, styledUsage(ui.For(stderr)))
 		return 2
 	}
 	switch args[0] {
@@ -62,13 +64,13 @@ func cli(args []string, stdout, stderr io.Writer) int {
 			file = args[2]
 		}
 		if err := jail.ListSessions(file, stdout); err != nil {
-			fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+			ui.Error(stderr, "%v", err)
 			return 2
 		}
 		return 0
 	case "tools":
 		if err := jail.Tools(args[1:], stdout, stderr); err != nil {
-			fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+			ui.Error(stderr, "%v", err)
 			return 2
 		}
 		return 0
@@ -85,7 +87,7 @@ func cli(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if err := jail.RestoreEnv(args[1]); err != nil {
-			fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+			ui.Error(stderr, "%v", err)
 			return 2
 		}
 		return cli(args[2:], stdout, stderr)
@@ -98,26 +100,27 @@ func cli(args []string, stdout, stderr io.Writer) int {
 			return configCheck(file, stdout, stderr)
 		}
 	case "help", "--help", "-h":
-		fmt.Fprint(stdout, usage)
+		fmt.Fprint(stdout, styledUsage(ui.For(stdout)))
 		return 0
 	}
-	fmt.Fprint(stderr, usage)
+	fmt.Fprint(stderr, styledUsage(ui.For(stderr)))
 	return 2
 }
 
 func configCheck(file string, stdout, stderr io.Writer) int {
 	_, problems, err := config.LoadFile(file, config.Options{})
 	if err != nil {
-		fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+		ui.Error(stderr, "%v", err)
 		return 2
 	}
+	st := ui.For(stderr)
 	for _, p := range problems {
-		fmt.Fprintln(stderr, p.Format(file))
+		fmt.Fprintln(stderr, p.FormatStyled(file, st))
 	}
 	if config.HasErrors(problems) {
 		return 1
 	}
-	fmt.Fprintf(stdout, "%s: ok\n", file)
+	fmt.Fprintf(stdout, "%s: %s\n", file, ui.For(stdout).BoldGreen("ok"))
 	return 0
 }
 
@@ -163,7 +166,7 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 			opts.Resume = a // a session id
 			args = args[1:]
 		default:
-			fmt.Fprint(stderr, usage)
+			fmt.Fprint(stderr, styledUsage(ui.For(stderr)))
 			return 2
 		}
 	}
@@ -176,7 +179,7 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 	if verb == "resume" {
 		s, err := chooseSession(opts, pick, os.Stdin, stderr)
 		if err != nil {
-			fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+			ui.Error(stderr, "%v", err)
 			return 2
 		}
 		opts.Agent, opts.Resume = s.Tool, s.ID
@@ -196,7 +199,7 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		code, err = jail.Launch(opts)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "aicatraz: %v\n", err)
+		ui.Error(stderr, "%v", err)
 		return 2
 	}
 	return code
@@ -229,4 +232,34 @@ func chooseSession(opts jail.Options, pick bool, in io.Reader, stderr io.Writer)
 		return nil, fmt.Errorf("no sessions recorded for this project yet")
 	}
 	return jail.FindSession(opts.ConfigPath, fields[3])
+}
+
+var (
+	usageVerb = regexp.MustCompile(`^(  aicatraz )([a-z|]+)`)
+	usageFlag = regexp.MustCompile(`(\s|\[)(--?[a-z][a-z-]*)`)
+)
+
+// styledUsage colors the usage text: command names bold cyan, flags yellow,
+// descriptions dimmed.
+func styledUsage(st ui.Style) string {
+	if !st.Enabled() {
+		return usage
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(usage, "\n"), "\n") {
+		switch {
+		case line == "usage:":
+			b.WriteString(st.Bold(line))
+		case strings.HasPrefix(line, "  aicatraz "):
+			line = usageFlag.ReplaceAllStringFunc(line, func(m string) string {
+				return m[:1] + st.Yellow(m[1:])
+			})
+			line = usageVerb.ReplaceAllString(line, "$1"+st.BoldCyan("$2"))
+			b.WriteString(line)
+		default:
+			b.WriteString(st.Dim(line)) // continuation lines describe the command above
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }

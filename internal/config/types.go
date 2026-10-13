@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 // Config is the parsed configuration file.
@@ -173,14 +175,18 @@ type Problem struct {
 }
 
 // Format renders a problem as "file:line: error: message".
-func (p Problem) Format(file string) string {
-	label := "error"
+func (p Problem) Format(file string) string { return p.FormatStyled(file, ui.Style{}) }
+
+// FormatStyled is Format with colors: the location bold, the label red for
+// errors and yellow for warnings.
+func (p Problem) FormatStyled(file string, st ui.Style) string {
+	label := st.BoldRed("error")
 	if p.Severity == Warning {
-		label = "warning"
+		label = st.BoldYellow("warning")
 	}
 	loc := file
 	if p.Line > 0 {
 		loc = fmt.Sprintf("%s:%d", file, p.Line)
 	}
-	return fmt.Sprintf("%s: %s: %s", loc, label, p.Msg)
+	return fmt.Sprintf("%s: %s: %s", st.Bold(loc), label, p.Msg)
 }

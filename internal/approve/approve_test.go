@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 // The test binary doubles as the popup helper, like the aicatraz binary does.
@@ -394,5 +396,93 @@ func TestPromptPinKey(t *testing.T) {
 	}
 	if ParseAnswer(AllowPin.String()) != AllowPin {
 		t.Error("pin round trip")
+	}
+}
+
+func TestRenderStyledColorsDiffsAndOptions(t *testing.T) {
+	st := ui.On()
+	diff := "--- approved: Makefile\n+++ now: Makefile\n@@ -1 +1 @@\n-all: ok\n+all: pwn\n context\n"
+	out := RenderStyled(Request{
+		Name: "make", Args: []string{"deploy"}, Cwd: "/p", Binary: "/usr/bin/make", CanPin: true,
+		Warnings: []string{"normally silent"},
+		Files: []FileChange{
+			{Path: "/p/Makefile", Status: "changed since last approved", Diff: diff},
+			{Path: "/p/new.mk", Status: "never approved before"},
+			{Path: "/p/old.mk", Status: "deleted since last approved"},
+		},
+	}, st)
+
+	for name, want := range map[string]string{
+		"added line is green":    st.Green("+all: pwn"),
+		"removed line is red":    st.Red("-all: ok"),
+		"hunk header is cyan":    st.Cyan("@@ -1 +1 @@"),
+		"file header is bold":    st.Bold("+++ now: Makefile"),
+		"changed status is red":  st.BoldRed("changed since last approved"),
+		"new status is yellow":   st.BoldYellow("never approved before"),
+		"deleted status is red":  st.BoldRed("deleted since last approved"),
+		"warning is highlighted": st.BoldYellow("!! " + Quote("normally silent")),
+		"HOST is flagged":        st.BoldRed("ON THE HOST"),
+		"keys are highlighted":   st.BoldGreen("[y]"),
+		"pin key":                st.BoldGreen("[p]"),
+		"default is marked":      st.BoldRed("[n] deny"),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%s: %q missing in\n%q", name, want, out)
+		}
+	}
+	if !strings.Contains(ui.Strip(out), "(default: Enter)") {
+		t.Error("the default answer must be named")
+	}
+	// Stripping the color gives exactly the plain prompt.
+	plain := Render(Request{
+		Name: "make", Args: []string{"deploy"}, Cwd: "/p", Binary: "/usr/bin/make", CanPin: true,
+		Warnings: []string{"normally silent"},
+		Files: []FileChange{
+			{Path: "/p/Makefile", Status: "changed since last approved", Diff: diff},
+			{Path: "/p/new.mk", Status: "never approved before"},
+			{Path: "/p/old.mk", Status: "deleted since last approved"},
+		},
+	})
+	if ui.Strip(out) != plain {
+		t.Errorf("styled and plain output differ apart from color:\n%q\n%q", ui.Strip(out), plain)
+	}
+}
+
+func TestColorCannotCarryAgentEscapes(t *testing.T) {
+	hostile := "\x1b[2J\x1b[31mred\x1b]0;title\x07\x1b[0m"
+	out := RenderStyled(Request{
+		Name: hostile, Args: []string{hostile}, Cwd: hostile, Binary: hostile,
+		EnvPassed: []string{hostile}, RuleText: hostile, Warnings: []string{hostile},
+		Files: []FileChange{{Path: hostile, Status: "changed since last approved", Diff: "+" + hostile + "\n-" + hostile, Note: hostile}},
+	}, ui.On())
+	// After removing aicatraz's own color codes, no escape character may remain.
+	if rest := ui.Strip(out); strings.ContainsRune(rest, 0x1b) || strings.ContainsRune(rest, 0x07) {
+		t.Fatalf("agent-controlled escape survived: %q", rest)
+	}
+}
+
+func TestPromptColorsOnlyOnTerminals(t *testing.T) {
+	// A terminal gets color...
+	m, s := ptyPair(t)
+	res := make(chan Answer, 1)
+	go func() {
+		a, _ := Prompt(context.Background(), s, s, Request{Name: "x"}, 5*time.Second)
+		res <- a
+	}()
+	out := readUntil(t, m, "deny", 3*time.Second)
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("a terminal should get colors: %q", out)
+	}
+	time.Sleep(100 * time.Millisecond)
+	m.Write([]byte("n"))
+	<-res
+
+	// ...a pipe or file doesn't.
+	r, w, _ := os.Pipe()
+	w.Write([]byte("y"))
+	var buf bytes.Buffer
+	Prompt(context.Background(), r, &buf, Request{Name: "x"}, time.Second)
+	if strings.Contains(buf.String(), "\x1b[") {
+		t.Errorf("no color codes into a non-terminal: %q", buf.String())
 	}
 }

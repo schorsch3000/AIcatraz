@@ -22,6 +22,7 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/broker"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/pins"
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 // Options for Launch.
@@ -46,7 +47,7 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 	for _, p := range problems {
-		fmt.Fprintln(o.Stderr, p.Format(o.ConfigPath))
+		fmt.Fprintln(o.Stderr, p.FormatStyled(o.ConfigPath, ui.For(o.Stderr)))
 	}
 	if config.HasErrors(problems) {
 		return 0, errors.New("config has errors")
@@ -230,7 +231,7 @@ func startBroker(cfg *config.Config, state, runBase, runDir, id string, uid int,
 	}
 	go func() {
 		if err := b.Serve(l); err != nil {
-			fmt.Fprintf(stderr, "aicatraz: broker stopped: %v\n", err)
+			ui.Error(stderr, "broker stopped: %v", err)
 		}
 	}()
 	return func() {
@@ -363,7 +364,7 @@ func chooseApprover(cfg *config.Config, o Options, runDir string) approve.Approv
 	}
 	say := func(format string, a ...any) {
 		if hasAsk {
-			fmt.Fprintf(o.Stderr, "aicatraz: "+format+"\n", a...)
+			ui.Note(o.Stderr, format, a...)
 		}
 	}
 

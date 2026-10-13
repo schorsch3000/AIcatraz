@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 // Answer is the human's decision.
@@ -149,35 +151,43 @@ func Sanitize(s string) string {
 	return b.String()
 }
 
-// indentLines sanitises text and prefixes each line, cutting it at max lines.
-func indentLines(text, prefix string, max int) string {
+// indentLines sanitises text, colors it as a diff, and prefixes each line,
+// cutting it at max lines.
+func indentLines(text, prefix string, max int, st ui.Style) string {
 	lines := strings.Split(strings.TrimRight(Sanitize(text), "\n"), "\n")
 	var b strings.Builder
 	for i, l := range lines {
 		if i == max {
-			fmt.Fprintf(&b, "%s... (%d more lines, not shown: review the file itself before approving)\n", prefix, len(lines)-max)
+			fmt.Fprintf(&b, "%s%s\n", st.Dim(prefix), st.Yellow(fmt.Sprintf("... (%d more lines, not shown: review the file itself before approving)", len(lines)-max)))
 			break
 		}
 		if len(l) > 200 {
 			l = l[:200] + "..."
 		}
-		b.WriteString(prefix + l + "\n")
+		b.WriteString(st.Dim(prefix) + diffLine(st, l) + "\n")
 	}
 	return b.String()
 }
 
-// Render produces the text of the prompt. Plain text, safe to print.
-func Render(r Request) string {
+// Render produces the plain text of the prompt.
+func Render(r Request) string { return RenderStyled(r, ui.Style{}) }
+
+// RenderStyled produces the prompt with colors. Only aicatraz's own text is
+// colored; everything that comes from the agent is sanitized first and then
+// wrapped, so color can't be used to smuggle anything onto the terminal.
+func RenderStyled(r Request, st ui.Style) string {
 	var b strings.Builder
-	line := func(label, value string) { fmt.Fprintf(&b, "  %-8s %s\n", label, value) }
+	line := func(label, value string) {
+		fmt.Fprintf(&b, "  %s %s\n", st.Dim(fmt.Sprintf("%-8s", label)), value)
+	}
 
 	if r.Kind == KindBuild {
-		b.WriteString("\n  aicatraz: the project's build files need approval before the image is built\n\n")
-		line("build", QuoteArgs(r.Name, r.Args))
+		b.WriteString("\n  " + st.Bold("aicatraz: the project's build files need approval before the image is built") + "\n\n")
+		line("build", st.Bold(QuoteArgs(r.Name, r.Args)))
 		line("context", Quote(r.Cwd))
 	} else {
-		b.WriteString("\n  aicatraz: the agent wants to run a command ON THE HOST\n\n")
-		line("command", QuoteArgs(r.Name, r.Args))
+		b.WriteString("\n  " + st.Bold("aicatraz: the agent wants to run a command ") + st.BoldRed("ON THE HOST") + "\n\n")
+		line("command", st.Bold(QuoteArgs(r.Name, r.Args)))
 		line("cwd", Quote(r.Cwd))
 		line("binary", Quote(r.Binary))
 		if len(r.EnvPassed) > 0 {
@@ -185,40 +195,76 @@ func Render(r Request) string {
 			for i, n := range r.EnvPassed {
 				quoted[i] = Quote(n)
 			}
-			line("env", "passes "+strings.Join(quoted, ", "))
+			line("env", st.Yellow("passes "+strings.Join(quoted, ", ")))
 		} else {
-			line("env", "no variables beyond the basics")
+			line("env", st.Dim("no variables beyond the basics"))
 		}
 		if r.RuleText != "" {
-			line("rule", Quote(r.RuleText))
+			line("rule", st.Dim(Quote(r.RuleText)))
 		}
 	}
 	for _, w := range r.Warnings {
-		b.WriteString("\n  !! " + Quote(w) + "\n")
+		b.WriteString("\n  " + st.BoldYellow("!! "+Quote(w)) + "\n")
 	}
 	for _, f := range r.Files {
-		fmt.Fprintf(&b, "\n  !! %s: %s\n", Quote(f.Path), f.Status)
+		fmt.Fprintf(&b, "\n  %s %s: %s\n", st.BoldYellow("!!"), Quote(f.Path), statusStyle(st, f.Status))
 		if f.Note != "" {
-			b.WriteString("     " + Sanitize(f.Note) + "\n")
+			b.WriteString("     " + st.Dim(Sanitize(f.Note)) + "\n")
 		}
 		if f.Diff != "" {
-			b.WriteString(indentLines(f.Diff, "     | ", maxDiffLines))
+			b.WriteString(indentLines(f.Diff, "     | ", maxDiffLines, st))
 		}
 	}
-	b.WriteString("\n  " + options(r) + "\n")
+	b.WriteString("\n" + options(r, st))
 	return b.String()
 }
 
-func options(r Request) string {
+// statusStyle colors a file status: new files yellow, changed or deleted red.
+func statusStyle(st ui.Style, status string) string {
+	switch {
+	case strings.HasPrefix(status, "never"):
+		return st.BoldYellow(status)
+	case strings.HasPrefix(status, "changed"), strings.HasPrefix(status, "deleted"):
+		return st.BoldRed(status)
+	}
+	return st.Bold(status)
+}
+
+// diffLine colors one line of a unified diff.
+func diffLine(st ui.Style, l string) string {
+	switch {
+	case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
+		return st.Bold(l)
+	case strings.HasPrefix(l, "@@"):
+		return st.Cyan(l)
+	case strings.HasPrefix(l, "+"):
+		return st.Green(l)
+	case strings.HasPrefix(l, "-"):
+		return st.Red(l)
+	}
+	return st.Dim(l)
+}
+
+// options lists the answers, one per line. The key is highlighted, and the
+// default (what Enter does) is marked.
+func options(r Request, st ui.Style) string {
+	var b strings.Builder
+	opt := func(key, text string) {
+		b.WriteString("  " + st.BoldGreen("["+key+"]") + " " + text + "\n")
+	}
 	if r.Kind == KindBuild {
+		opt("y", "build once")
 		if r.CanPin {
-			return "[y] build once    [p] build, and remember these files as approved    [n] cancel"
+			opt("p", "build, and remember these files as approved")
 		}
-		return "[y] build once    [n] cancel"
+		b.WriteString("  " + st.BoldRed("[n] cancel") + st.Dim("   (default: Enter)") + "\n")
+		return b.String()
 	}
-	opts := "[y] run once    [s] run, and allow this exact call for the session"
+	opt("y", "run once")
+	opt("s", "run, and allow this exact call for the session")
 	if r.CanPin {
-		opts += "    [p] run, and remember these files as approved"
+		opt("p", "run, and remember these files as approved")
 	}
-	return opts + "    [n] deny"
+	b.WriteString("  " + st.BoldRed("[n] deny") + st.Dim("   (default: Enter)") + "\n")
+	return b.String()
 }

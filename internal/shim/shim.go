@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/schorsch3000/aicatraz/internal/proto"
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 // Exit codes for failures of the proxy itself, chosen to be distinguishable
@@ -55,14 +56,14 @@ type IO struct {
 func Run(name string, args []string, std IO) int {
 	conn, err := dial()
 	if err != nil {
-		fmt.Fprintf(std.Stderr, "aicatraz: cannot reach the broker at %s: %v\n", SocketPath, err)
+		ui.Error(std.Stderr, "cannot reach the broker at %s: %v", SocketPath, err)
 		return ExitUnavailable
 	}
 	defer conn.Close()
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(std.Stderr, "aicatraz: %v\n", err)
+		ui.Error(std.Stderr, "%v", err)
 		return ExitNotFound
 	}
 	stdinFd := int(std.Stdin.Fd())
@@ -74,7 +75,7 @@ func Run(name string, args []string, std IO) int {
 		}
 	}
 	if err := conn.WriteJSON(proto.THello, hello); err != nil {
-		fmt.Fprintf(std.Stderr, "aicatraz: %v\n", err)
+		ui.Error(std.Stderr, "%v", err)
 		return ExitUnavailable
 	}
 
@@ -86,19 +87,19 @@ func Run(name string, args []string, std IO) int {
 
 	dec, err := awaitDecision(conn)
 	if err != nil {
-		fmt.Fprintf(std.Stderr, "aicatraz: no answer from the broker: %v\n", err)
+		ui.Error(std.Stderr, "no answer from the broker: %v", err)
 		return ExitLost
 	}
 	switch dec.Action {
 	case proto.ActionDeny:
-		fmt.Fprintf(std.Stderr, "aicatraz: %s: %s\n", name, dec.Message)
+		ui.Error(std.Stderr, "%s: %s", name, dec.Message)
 		return ExitDenied
 	case proto.ActionLocal:
 		return execLocal(name, args, std.Stderr)
 	case proto.ActionRun:
 		return stream(conn, std, tty)
 	}
-	fmt.Fprintf(std.Stderr, "aicatraz: unknown decision %q\n", dec.Action)
+	ui.Error(std.Stderr, "unknown decision %q", dec.Action)
 	return ExitLost
 }
 
@@ -198,7 +199,7 @@ func stream(conn *proto.Conn, std IO, tty bool) int {
 			if tty {
 				fmt.Fprint(std.Stderr, "\r") // the terminal is still raw
 			}
-			fmt.Fprintf(std.Stderr, "aicatraz: lost the connection to the broker: %v\n", err)
+			ui.Error(std.Stderr, "lost the connection to the broker: %v", err)
 			return ExitLost
 		}
 		switch t {
@@ -221,11 +222,11 @@ func stream(conn *proto.Conn, std IO, tty bool) int {
 func execLocal(name string, args []string, stderr io.Writer) int {
 	real, err := lookPathSkipping(name, os.Getenv("PATH"), BinDir)
 	if err != nil {
-		fmt.Fprintf(stderr, "aicatraz: %s: command not found in the container\n", name)
+		ui.Error(stderr, "%s: command not found in the container", name)
 		return ExitNotFound
 	}
 	err = syscall.Exec(real, append([]string{name}, args...), os.Environ())
-	fmt.Fprintf(stderr, "aicatraz: %s: %v\n", name, err)
+	ui.Error(stderr, "%s: %v", name, err)
 	return ExitNotFound
 }
 

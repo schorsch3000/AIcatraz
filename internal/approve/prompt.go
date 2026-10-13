@@ -10,6 +10,8 @@ import (
 
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
+
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 const pollSlice = 100 * time.Millisecond
@@ -34,7 +36,7 @@ func Prompt(ctx context.Context, in *os.File, out io.Writer, req Request, timeou
 		_ = unix.IoctlSetInt(int(in.Fd()), unix.TCFLSH, unix.TCIFLUSH)
 	}
 
-	text := Render(req)
+	text := RenderStyled(req, ui.For(out))
 	if raw {
 		text = strings.ReplaceAll(text, "\n", "\r\n") // raw mode doesn't translate newlines
 	}
@@ -48,13 +50,16 @@ func Prompt(ctx context.Context, in *os.File, out io.Writer, req Request, timeou
 	if raw {
 		nl = "\r\n"
 	}
+	st := ui.For(out)
 	switch {
 	case err == ErrTimeout:
-		fmt.Fprintf(out, "%s  -> timed out: denied%s", nl, nl)
+		fmt.Fprintf(out, "%s  %s%s", nl, st.BoldYellow("-> timed out: denied"), nl)
 	case err != nil:
-		fmt.Fprintf(out, "%s  -> cancelled%s", nl, nl)
+		fmt.Fprintf(out, "%s  %s%s", nl, st.Yellow("-> cancelled"), nl)
+	case answer == Deny:
+		fmt.Fprintf(out, "%s  %s%s", nl, st.BoldRed("-> "+answerText(answer)), nl)
 	default:
-		fmt.Fprintf(out, "%s  -> %s%s", nl, answerText(answer), nl)
+		fmt.Fprintf(out, "%s  %s%s", nl, st.BoldGreen("-> "+answerText(answer)), nl)
 	}
 	return answer, err
 }

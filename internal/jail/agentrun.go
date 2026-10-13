@@ -13,6 +13,7 @@ import (
 
 	"github.com/schorsch3000/aicatraz/internal/agent"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 // ContainerTools is where the agent's executable directory is mounted.
@@ -70,7 +71,7 @@ func planAgent(o Options, cfg *config.Config, home, state string, uid, gid int, 
 		if dry {
 			dir, resolved = filepath.Join(cache, prof.Name, "<not installed yet>"), "<not installed yet>"
 		} else {
-			fmt.Fprintf(o.Stderr, "aicatraz: %s is not installed yet; installing it (first use only)\n", prof.Name)
+			ui.Note(o.Stderr, "%s is not installed yet; installing it (first use only)", prof.Name)
 			if _, err := agent.InstallInContainer(cache, prof, version, uid, gid, o.Stderr); err != nil {
 				return nil, fmt.Errorf("%w\n(if %s is installed on this machine, `aicatraz tools install %s --from-host` copies it instead)", err, prof.Name, prof.Name)
 			}
@@ -162,7 +163,7 @@ func (a *agentRun) finish(in RunInput, started time.Time, exitCode int, o Option
 	case "opencode":
 		found, err := a.newestOpencodeSession(in, started)
 		if err != nil {
-			fmt.Fprintf(o.Stderr, "aicatraz: could not look up the opencode session: %v\n", err)
+			ui.Error(o.Stderr, "could not look up the opencode session: %v", err)
 			return
 		}
 		if found == nil {
@@ -178,10 +179,11 @@ func (a *agentRun) finish(in RunInput, started time.Time, exitCode int, o Option
 		ExitCode: exitCode, Image: in.Image, Directory: in.Cwd,
 	})
 	if err != nil {
-		fmt.Fprintf(o.Stderr, "aicatraz: could not record the session: %v\n", err)
+		ui.Error(o.Stderr, "could not record the session: %v", err)
 		return
 	}
-	fmt.Fprintf(o.Stderr, "\naicatraz: session %s saved; continue it with `aicatraz resume`\n", id)
+	fmt.Fprintln(o.Stderr)
+	ui.Good(o.Stderr, "session %s saved; continue it with `aicatraz resume`", id)
 }
 
 // newestOpencodeSession asks opencode, in a throwaway container with the same
@@ -234,12 +236,15 @@ func ListSessions(configPath string, w io.Writer) error {
 		fmt.Fprintln(w, "no sessions recorded for this project yet")
 		return nil
 	}
+	st := ui.For(w)
 	for _, s := range list {
 		title := s.Title
 		if len(title) > 50 {
 			title = title[:47] + "..."
 		}
-		fmt.Fprintf(w, "%s  %-8s  %s  %s\n", s.Ended.Local().Format("2006-01-02 15:04"), s.Tool, s.ID, title)
+		// Plain columns when not a terminal: `resume --pick` parses this output.
+		fmt.Fprintf(w, "%s  %s  %s  %s\n", st.Dim(s.Ended.Local().Format("2006-01-02 15:04")),
+			st.Cyan(fmt.Sprintf("%-8s", s.Tool)), st.Yellow(s.ID), title)
 	}
 	return nil
 }
@@ -295,11 +300,12 @@ func Tools(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintf(stdout, "nothing installed (cache: %s)\n", cache)
 		}
 		for _, t := range list {
+			st := ui.For(stdout)
 			mark := " "
 			if t.Current {
-				mark = "*"
+				mark = st.BoldGreen("*")
 			}
-			fmt.Fprintf(stdout, "%s %-9s %s\n", mark, t.Tool, t.Version)
+			fmt.Fprintf(stdout, "%s %s %s\n", mark, st.Cyan(fmt.Sprintf("%-9s", t.Tool)), t.Version)
 		}
 		return nil
 	case "install", "update":
@@ -345,7 +351,7 @@ func Tools(args []string, stdout, stderr io.Writer) error {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "%s %s installed\n", n, v)
+			fmt.Fprintf(stdout, "%s %s %s\n", ui.For(stdout).Cyan(n), v, ui.For(stdout).BoldGreen("installed"))
 		}
 		return nil
 	}
