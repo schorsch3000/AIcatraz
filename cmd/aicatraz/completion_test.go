@@ -33,7 +33,7 @@ func TestCompletionScripts(t *testing.T) {
 
 func TestCompletionEveryVerbIsKnown(t *testing.T) {
 	// A verb added to the CLI must be added to the completion table too.
-	for _, v := range []string{"up", "run", "shell", "claude", "opencode", "agent", "sessions", "resume", "tools", "init", "config", "version"} {
+	for _, v := range []string{"up", "down", "run", "shell", "claude", "opencode", "agent", "sessions", "resume", "tools", "init", "config", "version"} {
 		found := false
 		for _, cv := range completionVerbs {
 			found = found || cv.name == v

@@ -617,7 +617,7 @@ func TestUpPrintsTheTmuxCommand(t *testing.T) {
 	fake := t.TempDir()
 	os.WriteFile(filepath.Join(fake, "tmux"), []byte("#!/bin/sh\n[ \"$1\" = has-session ] && exit 1\nexit 0\n"), 0o755)
 
-	cmd := exec.Command(bin, "up", "--print", "--", "claude")
+	cmd := exec.Command(bin, "up", "--tmux", "--print", "--", "claude")
 	cmd.Dir = p.dir
 	cmd.Env = append(os.Environ(), "PATH="+fake+":"+os.Getenv("PATH"), "TMUX=", "XDG_RUNTIME_DIR="+p.runtime, "HOME="+p.home)
 	cmd.Env = append(cmd.Env, "MY_SECRET_TOKEN=hunter2")
@@ -633,6 +633,29 @@ func TestUpPrintsTheTmuxCommand(t *testing.T) {
 	}
 	if strings.Contains(line, "hunter2") {
 		t.Error("environment leaked into the tmux command line")
+	}
+}
+
+func TestUpPrintsTheSessionServerCommand(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "project: {id: demo}\nvolumes:\n  - ~/p:rw\n")
+	cmd := exec.Command(bin, "up", "--print", "--", "claude")
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+p.runtime, "HOME="+p.home, "MY_SECRET_TOKEN=hunter2")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	for _, want := range []string{"__mux-serve", "run -c " + filepath.Join(p.dir, "aicatraz.yaml"), "--approval-sock", "approve.sock", "-- claude"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("missing %q in %s", want, out)
+		}
+	}
+	if strings.Contains(string(out), "hunter2") {
+		t.Error("environment leaked into the command line")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(p.runtime, "aicatraz")); len(entries) != 0 {
+		t.Errorf("--print left files behind: %v", entries)
 	}
 }
 
@@ -1313,5 +1336,132 @@ func TestStaleSessionDirectoriesAreCleanedUp(t *testing.T) {
 	}
 	if _, err := os.Stat(alive); err != nil {
 		t.Error("the directory of a live process must be left alone")
+	}
+}
+
+// userTerm is a user's terminal for driving `up`: a pty with everything it shows
+// collected.
+type userTerm struct {
+	t    *testing.T
+	pty  *os.File
+	cmd  *exec.Cmd
+	mu   sync.Mutex
+	seen strings.Builder
+}
+
+func (p *project) startTerm(args ...string) *userTerm {
+	p.t.Helper()
+	realDocker := filepath.Join(realHome(), ".docker")
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+realDocker,
+		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_DATA_HOME="+filepath.Join(p.home, ".data"),
+		"XDG_RUNTIME_DIR="+p.runtime)
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 30, Cols: 100})
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	tm := &userTerm{t: p.t, pty: ptmx, cmd: cmd}
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(buf)
+			tm.mu.Lock()
+			tm.seen.Write(buf[:n])
+			tm.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	p.t.Cleanup(func() { ptmx.Close(); cmd.Process.Kill(); cmd.Wait() })
+	return tm
+}
+
+func (tm *userTerm) screen() string {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	return tm.seen.String()
+}
+
+func (tm *userTerm) expect(what string, within time.Duration) {
+	tm.t.Helper()
+	for end := time.Now().Add(within); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		if strings.Contains(tm.screen(), what) {
+			return
+		}
+	}
+	tm.t.Fatalf("never saw %q in\n%q", what, tm.screen())
+}
+
+func (tm *userTerm) send(s string) { tm.pty.WriteString(s) }
+
+func (tm *userTerm) wait(within time.Duration) int {
+	tm.t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- tm.cmd.Wait() }()
+	select {
+	case <-done:
+		return tm.cmd.ProcessState.ExitCode()
+	case <-time.After(within):
+		tm.t.Fatalf("process did not end; screen:\n%q", tm.screen())
+		return -1
+	}
+}
+
+// The built-in multiplexer end to end: an ask prompt over the agent's screen,
+// detach and reattach, a prompt that waits for you, and `down`.
+func TestUpSession(t *testing.T) {
+	p := newProject(t)
+	p.write("Makefile", "deploy:\n\t@echo DEPLOYED-ON-HOST\n")
+	p.write("aicatraz.yaml", "project: {id: it-up}\nvolumes:\n  - ~/p:rw\nrules:\n  - command: make\n    args: [deploy]\n    decision: ask\n")
+	down := func() ([]byte, error) {
+		cmd := exec.Command(bin, "down", "-c", filepath.Join(p.dir, "aicatraz.yaml"))
+		cmd.Env = append(os.Environ(), "HOME="+p.home, "XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
+		return cmd.CombinedOutput()
+	}
+	t.Cleanup(func() { down() })
+	p.removeImage("it-up")
+
+	tm := p.startTerm("up", "--approve-build", "--", "sh")
+	tm.expect("$ ", 120*time.Second)
+	tm.send("(make deploy; echo make-rc=$?)\r")
+	tm.expect("ON THE HOST", 20*time.Second)
+	tm.send("y") // too early: keys are ignored while the prompt arms
+	time.Sleep(900 * time.Millisecond)
+	if strings.Contains(tm.screen(), "DEPLOYED") {
+		t.Fatal("a key typed as the prompt appeared answered it")
+	}
+	tm.send("y")
+	tm.expect("make-rc=0", 20*time.Second)
+	tm.expect("DEPLOYED-ON-HOST", 5*time.Second)
+
+	// Detach: the session and the jail stay.
+	tm.send("(sleep 2; make deploy; echo late-rc=$?) &\r")
+	time.Sleep(300 * time.Millisecond)
+	tm.send("\x19")
+	if code := tm.wait(10 * time.Second); code != 0 {
+		t.Fatalf("detach exit code %d", code)
+	}
+	if out, _ := exec.Command("docker", "ps", "-q", "--filter", "label=aicatraz.project=it-up").Output(); len(bytes.TrimSpace(out)) == 0 {
+		t.Fatal("the jail stopped when the client detached")
+	}
+	time.Sleep(3 * time.Second) // the background make asks, with nobody attached
+
+	tm2 := p.startTerm("up")
+	tm2.expect("ON THE HOST", 20*time.Second) // the waiting prompt is shown on attach
+	time.Sleep(900 * time.Millisecond)
+	tm2.send("n")
+	tm2.expect("late-rc=", 10*time.Second)
+	if strings.Contains(tm2.screen(), "late-rc=0") {
+		t.Error("a denied command ran")
+	}
+
+	if out, err := down(); err != nil {
+		t.Fatalf("down: %v %s", err, out)
+	}
+	tm2.wait(15 * time.Second)
+	if out, _ := exec.Command("docker", "ps", "-q", "--filter", "label=aicatraz.project=it-up").Output(); len(bytes.TrimSpace(out)) != 0 {
+		t.Error("the jail still runs after down")
 	}
 }

@@ -95,8 +95,9 @@ The first version of the door.
 **Done when:** someone else can go from clone to a working jail with the README alone.
 
 ## M8: optional, later
+
 - Egress allowlist (domain-filtering proxy in front of the container).
-- Built-in multiplexer replacing tmux.
+- **Built-in multiplexer replacing tmux.** *Status: implemented (`internal/mux`).* `aicatraz up` starts a detached session server that runs `aicatraz run` on a pty and serves one client at a time; `Ctrl-Y` detaches (configurable), `up` attaches again, `down` stops it. It is a pass-through multiplexer in the style of dtach, not a terminal emulator: it keeps no screen, follows only the terminal modes the program sets (alternate screen, mouse, bracketed paste, cursor, keyboard modes) so it can restore them, and makes the program repaint on attach by resizing the pty. A status bar keeps the bottom row (white on dark green by default; `--bar-theme`, `--bar-fg`, `--bar-bg`, `aicatraz bar-colors`, `--status-bar off`): the program is told the terminal has one row less and a scroll region keeps its output above the bar; the layer rewrites only the program's own scroll-region requests and repairs the bar after a screen erase, a buffer switch or a reset. A first version put the bar on the top row, which needs every absolute row address translated (and the answers back, mouse included); it worked, but a region that does not start at the top row costs the host terminal its scrollback, so it was dropped for the bottom bar. Approval prompts go from the launcher over a private socket to the session, which has the attached client draw them on the alternate screen; keys for the prompt never reach the agent, and keys are ignored for the first 500 ms. A prompt that comes while nobody is attached waits and is shown on attach. `up --tmux` keeps the old tmux path. Tested with a stand-in program and a pty-driven client (modes, detach and reattach, prompts, takeover, withdrawal), and against real containers (`TestUpSession`).
 - Pin store tooling (`aicatraz pins list|forget`).
 
 ## Order and risk

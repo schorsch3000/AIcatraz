@@ -147,7 +147,7 @@ rules:
 **Decisions**
 
 - `allow`: runs on the host without asking.
-- `ask`: you are asked first (popup in tmux, or `--approval-tty`); with neither, it is denied. Answers: `y` run once, `s` run and allow this exact call (same arguments, directory and file contents) for the session, `p` run and remember the shown file versions (only offered when files changed), anything else denies; timeout denies.
+- `ask`: you are asked first (an overlay in `aicatraz up`, a popup in `up --tmux`, or `--approval-tty`); with none of them, it is denied. In `up`, a question that comes while you are detached waits (until the approval timeout) and is shown when you attach. Answers: `y` run once, `s` run and allow this exact call (same arguments, directory and file contents) for the session, `p` run and remember the shown file versions (only offered when files changed), anything else denies; timeout denies.
 - `local`: the shim runs the jail's own binary. No prompt, no pins, nothing leaves the jail. This is how arguments choose between jail and host: `make build` local, `make deploy` on the host.
 - `deny`: refused. Useful as a carve-out in front of a broader rule, or as an explicit last line.
 

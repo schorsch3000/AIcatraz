@@ -30,7 +30,7 @@ What it deliberately does **not** do: stop the agent from using the network (it 
 
 - Linux (other systems are out of scope) and Docker (tested with 26.1).
 - Go 1.24 or newer, to build.
-- `tmux`, if you want `aicatraz up` (approval prompts as a popup). Optional: `--approval-tty` works without it.
+- Nothing else: `aicatraz up` has its own terminal multiplexer. `tmux` is only needed for `up --tmux`.
 - For the agents: a Debian- or Ubuntu-based image. Both agents are dynamically linked against glibc and don't run on Alpine.
 
 ## Install
@@ -99,7 +99,7 @@ aicatraz sessions                        # later: list sessions...
 aicatraz resume                          # ...and continue the last one
 ```
 
-For prompts to appear while the agent works, start it with `aicatraz up --agent claude` inside tmux (they appear as a popup), or give a terminal: `--approval-tty /dev/pts/N`. Without either, `ask` rules are denied, and the denial says why.
+For prompts to appear while the agent works, start it with `aicatraz up --agent claude`: the prompt is drawn over the agent's screen, and you answer it there. Or give a terminal of your own: `--approval-tty /dev/pts/N`. Without either, `ask` rules are denied, and the denial says why.
 
 ## Commands
 
@@ -110,7 +110,9 @@ For prompts to appear while the agent works, start it with `aicatraz up --agent 
 | `aicatraz completion bash\|zsh\|fish` | Print shell completion code for `aicatraz` and `az`; see [Shell completion](#shell-completion). |
 | `aicatraz config check [file]` | Validate a config; warn about rules that are valid but risky. |
 | `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |
-| `aicatraz up [flags] [-- command...]` | Same, inside a tmux session (`aicatraz-<project>`), so approval prompts pop up. Attaches if it already runs. |
+| `aicatraz up [flags] [-- command...]` | Same, as a session that keeps running when you detach (`Ctrl-Y`, or `--detach-key ctrl-<key>` / `$AICATRAZ_DETACH_KEY`), and that shows approval prompts over the agent's screen. Attaches if it already runs. A status bar on the bottom row shows the project, what runs, how long, and the detach key (`--status-bar off`, colors: `--bar-theme`, `--bar-fg`, `--bar-bg`). `--tmux` uses a tmux session instead. |
+| `aicatraz down` | Stop the project's session (the jail shuts down). |
+| `aicatraz bar-colors` | Show the status bar in every color theme. |
 | `aicatraz shell [-- command...]` | Another shell in the running jail (a second terminal). Host commands use the same broker. |
 | `aicatraz claude` / `opencode` `[flags] [-- agent args...]` | Start that agent in the jail. Installed on first use. |
 | `aicatraz agent` | Start the agent named by `agent.tool` in the config. |
@@ -152,12 +154,26 @@ A project is identified by the real path of its config file; set `project.id` to
 - [idea-v2.md](idea-v2.md): the design in full, with the reasoning.
 - [milestones.md](milestones.md): how it was built.
 
+## The session's status bar
+
+`aicatraz up` keeps the bottom row of your terminal for a status bar: the project on the left, what runs and for how long in the middle (if there is room), and the detach key on the right. The program inside is told the terminal has one row less, and a scroll region keeps its output above the bar. It is a thin layer, not a terminal emulator; it is tested with vim and a shell. `--status-bar off` (or `AICATRAZ_STATUS_BAR=off`) turns it off, and is the first thing to try if something draws wrongly.
+
+The bar is white on dark green (`forest`) by default. `aicatraz bar-colors` shows it in 18 ready-made themes (with their contrast, so you can see which are easy to read). Choose one, or set the colors yourself:
+
+```bash
+aicatraz up --bar-theme charcoal
+aicatraz up --bar-theme amber --bar-fg '#102030'        # a theme, with another text color
+aicatraz up --bar-fg bright-white --bar-bg 24           # your own: a name, 0-255, #rrggbb or default
+```
+
+Names and the numbers 0 to 15 follow your terminal's color theme; 16 to 255 and `#rrggbb` look the same everywhere. To keep a choice, put it in your shell config: `AICATRAZ_BAR_THEME`, `AICATRAZ_BAR_FG` and `AICATRAZ_BAR_BG`. Colors are personal, so there is no config-file key for them.
+
 ## Troubleshooting
 
 | You see | Because | Do |
 |---|---|---|
 | `volume ...: ... does not exist` | A hidden path must exist at launch (otherwise the agent could create it). | Create the file or directory. |
-| `no approval terminal: ask rules will be denied` | Nobody can be asked. | Start with `aicatraz up` inside tmux, or `--approval-tty`. |
+| `no approval terminal: ask rules will be denied` | Nobody can be asked. | Start with `aicatraz up`, or pass `--approval-tty`. |
 | `build files changed since they were last approved` | `Dockerfile.az` is new or changed, and there is no terminal to ask. | Run `aicatraz run` interactively once and answer `p`, or pass `--approve-build`. |
 | `the image ... has no glibc dynamic loader` | The agents don't run on Alpine. | Use a Debian/Ubuntu-based image. |
 | `hidden path ... is no longer hidden`, session stopped | An editor saved a hidden *file* by renaming a new one over it. | Edit in place, or hide a directory (`.secrets/`). |
@@ -172,7 +188,7 @@ make test-integration    # real containers: needs docker and network access
 go test -race ./...      # a couple of minutes: the stress tests are heavy
 ```
 
-Layout: `cmd/aicatraz` (the one binary: launcher, broker, shim and CLI, chosen by the name it is started under), `internal/config` (schema and linter), `internal/jail` (container, volumes, build, tmux), `internal/broker` and `internal/shim` with `internal/proto` (the host door), `internal/policy`, `internal/pins`, `internal/approve`, `internal/canary`, `internal/agent`, `internal/examples`, `internal/ui`.
+Layout: `cmd/aicatraz` (the one binary: launcher, broker, shim and CLI, chosen by the name it is started under), `internal/config` (schema and linter), `internal/jail` (container, volumes, build, sessions), `internal/mux` (the built-in terminal multiplexer), `internal/broker` and `internal/shim` with `internal/proto` (the host door), `internal/policy`, `internal/pins`, `internal/approve`, `internal/canary`, `internal/agent`, `internal/examples`, `internal/ui`.
 
 ## Shell completion
 

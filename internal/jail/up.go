@@ -72,15 +72,24 @@ func mustID(cfgPath string) string {
 // inside the tmux pane and then runs the rest of its arguments.
 const UpEnvCommand = "__with-env"
 
-// Up starts the project's tmux session (or attaches to it), replacing this
-// process with tmux. If already inside tmux it simply runs the jail.
+// Up starts the project's session, or attaches to it. It uses the built-in
+// multiplexer, or tmux with o.Tmux.
 func Up(o Options) (int, error) {
+	if o.Tmux {
+		return UpTmux(o)
+	}
+	return UpMux(o)
+}
+
+// UpTmux starts the project's tmux session (or attaches to it), replacing this
+// process with tmux. If already inside tmux it simply runs the jail.
+func UpTmux(o Options) (int, error) {
 	if os.Getenv("TMUX") != "" {
 		return Launch(o)
 	}
 	tmux, err := exec.LookPath("tmux")
 	if err != nil {
-		return 0, fmt.Errorf("tmux is needed for `aicatraz up` (install it, or use `aicatraz run --approval-tty /dev/pts/N`)")
+		return 0, fmt.Errorf("tmux is needed for `aicatraz up --tmux` (install it, or drop --tmux to use the built-in multiplexer)")
 	}
 	cfgAbs, err := filepath.Abs(o.ConfigPath)
 	if err != nil {
@@ -199,5 +208,5 @@ func Shell(o Options) (int, error) {
 		fmt.Fprintln(o.Stdout, shellLine("docker", args))
 		return 0, nil
 	}
-	return runDocker(args, o)
+	return runDocker(args, o, "")
 }

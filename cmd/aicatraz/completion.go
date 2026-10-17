@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/schorsch3000/aicatraz/internal/examples"
+	"github.com/schorsch3000/aicatraz/internal/mux"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
@@ -36,10 +37,18 @@ var (
 	flagResume  = cflag{"", "resume", "value", "continue this agent session"}
 	flagPick    = cflag{"", "pick", "", "choose a session from a list"}
 	flagFromHst = cflag{"", "from-host", "", "copy the agent from this machine"}
+	flagDetach  = cflag{"", "detach-key", "value", "key that detaches, such as ctrl-y"}
+	flagBar     = cflag{"", "status-bar", "bar", "bottom or off"}
+	flagTheme   = cflag{"", "bar-theme", "theme", "color theme of the status bar"}
+	flagBarFG   = cflag{"", "bar-fg", "value", "text color of the status bar"}
+	flagBarBG   = cflag{"", "bar-bg", "value", "background color of the status bar"}
+	flagTmux    = cflag{"", "tmux", "", "use a tmux session instead of the built-in one"}
 )
 
 var completionVerbs = []cverb{
-	{name: "up", desc: "start the jail in a tmux session", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagAgent, flagResume}},
+	{name: "up", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagAgent, flagResume}},
+	{name: "bar-colors", desc: "show the status bar in every color theme"},
+	{name: "down", desc: "stop the session of this project", flags: []cflag{flagConfig}},
 	{name: "run", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagAgent, flagResume}},
 	{name: "shell", desc: "open another shell in the running jail", flags: []cflag{flagConfig}},
 	{name: "claude", desc: "start Claude Code in the jail", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild}},
@@ -83,6 +92,14 @@ func runCompletion(args []string, stdout, stderr io.Writer) int {
 	}
 	io.WriteString(stdout, gen())
 	return 0
+}
+
+func themeNames() []string {
+	var n []string
+	for _, t := range mux.Themes {
+		n = append(n, t.Name)
+	}
+	return n
 }
 
 func exampleNames() []string {
@@ -143,7 +160,13 @@ func bashCompletion() string {
 	w("    -e | --example)\n")
 	w("        COMPREPLY=($(compgen -W %q -- \"$cur\"))\n", strings.Join(exampleNames(), " "))
 	w("        return ;;\n")
-	w("    --resume)\n")
+	w("    --status-bar)\n")
+	w("        COMPREPLY=($(compgen -W 'bottom off' -- \"$cur\"))\n")
+	w("        return ;;\n")
+	w("    --bar-theme)\n")
+	w("        COMPREPLY=($(compgen -W %q -- \"$cur\"))\n", strings.Join(themeNames(), " "))
+	w("        return ;;\n")
+	w("    --resume | --detach-key | --bar-fg | --bar-bg)\n")
 	w("        return ;;\n")
 	w("    esac\n")
 	w("    if [[ $cur == -* ]]; then\n")
@@ -160,7 +183,7 @@ func bashCompletion() string {
 	w("    for ((i = 2; i < COMP_CWORD; i++)); do\n")
 	w("        word=${COMP_WORDS[i]}\n")
 	w("        case \"$word\" in\n")
-	w("        -c | --config | --approval-tty | --agent | --resume | -e | --example) ((i++)) ;;\n")
+	w("        -c | --config | --approval-tty | --agent | --resume | --status-bar | --bar-theme | --bar-fg | --bar-bg | --detach-key | -e | --example) ((i++)) ;;\n")
 	w("        -*) ;;\n")
 	w("        *) ((npos++)) ;;\n")
 	w("        esac\n")
@@ -203,7 +226,11 @@ func zshSpec(f cflag) string {
 	case "example":
 		action = ":example:(" + strings.Join(exampleNames(), " ") + ")"
 	case "value":
-		action = ":session id: "
+		action = ":value: "
+	case "bar":
+		action = ":position:(bottom off)"
+	case "theme":
+		action = ":theme:(" + strings.Join(themeNames(), " ") + ")"
 	}
 	if f.short != "" {
 		return fmt.Sprintf("'(-%s --%s)'{-%s,--%s}'[%s]%s'", f.short, f.long, f.short, f.long, f.desc, action)
@@ -293,6 +320,10 @@ func fishCompletion() string {
 				line += " -x -a '" + strings.Join(exampleNames(), " ") + "'"
 			case "value":
 				line += " -x"
+			case "bar":
+				line += " -x -a 'bottom off'"
+			case "theme":
+				line += " -x -a '" + strings.Join(themeNames(), " ") + "'"
 			}
 			w("%s -d %q\n", line, f.desc)
 		}

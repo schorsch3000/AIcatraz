@@ -35,17 +35,29 @@ func Prompt(ctx context.Context, in *os.File, out io.Writer, req Request, timeou
 		// Discard type-ahead.
 		_ = unix.IoctlSetInt(int(in.Fd()), unix.TCFLSH, unix.TCIFLUSH)
 	}
+	return PromptKeys(ctx, fdKeys(in), out, req, timeout, raw)
+}
 
+// KeySource returns the next key of the person answering. It returns
+// io.EOF when nobody is there any more, ErrTimeout once deadline has passed
+// and ctx.Err() if ctx ends first.
+type KeySource func(ctx context.Context, deadline time.Time) (byte, error)
+
+// PromptKeys is Prompt for a caller that owns the input: the keys come from
+// keys, the prompt is drawn on out. raw says out is a raw terminal, which
+// does not translate newlines. Enter, Esc, Ctrl-C, Ctrl-D and any other
+// unlisted key never approve: only y, s and p do.
+func PromptKeys(ctx context.Context, keys KeySource, out io.Writer, req Request, timeout time.Duration, raw bool) (Answer, error) {
 	text := RenderStyled(req, ui.For(out))
 	if raw {
-		text = strings.ReplaceAll(text, "\n", "\r\n") // raw mode doesn't translate newlines
+		text = strings.ReplaceAll(text, "\n", "\r\n")
 	}
 	if _, err := io.WriteString(out, text); err != nil {
 		return Deny, err
 	}
 
 	deadline := time.Now().Add(timeout)
-	answer, err := readAnswer(ctx, in, deadline, req)
+	answer, err := readAnswer(ctx, keys, deadline, req)
 	nl := "\n"
 	if raw {
 		nl = "\r\n"
@@ -76,38 +88,54 @@ func answerText(a Answer) string {
 	return "denied"
 }
 
-func readAnswer(ctx context.Context, in *os.File, deadline time.Time, req Request) (Answer, error) {
+// fdKeys reads keys from a file descriptor, polling so the deadline and the
+// context are honoured.
+func fdKeys(in *os.File) KeySource {
 	fd := int(in.Fd())
 	buf := make([]byte, 1)
-	for {
-		if err := ctx.Err(); err != nil {
-			return Deny, err
-		}
-		left := time.Until(deadline)
-		if left <= 0 {
-			return Deny, ErrTimeout
-		}
-		wait := min(left, pollSlice)
-		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-		n, err := unix.Poll(fds, int(wait.Milliseconds())+1)
-		if err != nil {
-			if err == unix.EINTR {
+	return func(ctx context.Context, deadline time.Time) (byte, error) {
+		for {
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+			left := time.Until(deadline)
+			if left <= 0 {
+				return 0, ErrTimeout
+			}
+			wait := min(left, pollSlice)
+			fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+			n, err := unix.Poll(fds, int(wait.Milliseconds())+1)
+			if err != nil {
+				if err == unix.EINTR {
+					continue
+				}
+				return 0, err
+			}
+			if n == 0 {
 				continue
 			}
+			if fds[0].Revents&(unix.POLLERR|unix.POLLNVAL) != 0 {
+				return 0, io.ErrUnexpectedEOF
+			}
+			m, err := in.Read(buf)
+			if m == 0 || err != nil {
+				return 0, io.EOF // hangup: nobody is there to answer
+			}
+			return buf[0], nil
+		}
+	}
+}
+
+func readAnswer(ctx context.Context, keys KeySource, deadline time.Time, req Request) (Answer, error) {
+	for {
+		key, err := keys(ctx, deadline)
+		switch {
+		case err == io.EOF:
+			return Deny, nil
+		case err != nil:
 			return Deny, err
 		}
-		if n == 0 {
-			continue
-		}
-		if fds[0].Revents&(unix.POLLERR|unix.POLLNVAL) != 0 {
-			return Deny, io.ErrUnexpectedEOF
-		}
-		m, err := in.Read(buf)
-		if m == 0 || err != nil {
-			// EOF or hangup: nobody is there to answer.
-			return Deny, nil
-		}
-		switch buf[0] {
+		switch key {
 		case 'y', 'Y':
 			return AllowOnce, nil
 		case 's', 'S':
@@ -121,6 +149,6 @@ func readAnswer(ctx context.Context, in *os.File, deadline time.Time, req Reques
 		case 'n', 'N', '\r', '\n', 27, 3, 4:
 			return Deny, nil
 		}
-		// Any other key is ignored; only an explicit y or s approves.
+		// Any other key is ignored; only an explicit y, s or p approves.
 	}
 }

@@ -260,7 +260,7 @@ The agent and the approval prompt must be on separate ptys so the agent can't ty
 - While waiting, the broker and shim keep exchanging heartbeats. If the agent's command is interrupted, the prompt is withdrawn. At most 4 prompts can wait at once.
 - Prompt content: the full resolved command (real binary path, argv, cwd, passed environment variable names), the matching rule, and the **file-change warning with diff** when a pin differs (M4).
 - Answers: `y` run once, `s` run and allow this exact call (same arguments, same directory) again for the rest of the session (memory only, never written to the config), anything else deny. Timeout is deny. `approval.timeout` in the config sets it (default 2 minutes, 5 seconds to 1 hour). Re-pinning arrives with M4.
-- A built-in multiplexer is a possible later step. tmux is the cheap, robust first version.
+- A built-in multiplexer replaced tmux as the default of `up` in M8 (see `milestones.md`); `up --tmux` keeps the tmux version described here.
 
 ### Execution details
 - `subprocess` with `shell=False`, never through a shell string.

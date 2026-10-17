@@ -11,20 +11,29 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/schorsch3000/aicatraz/internal/agent"
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/canary"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/jail"
+	"github.com/schorsch3000/aicatraz/internal/mux"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 const defaultConfig = "aicatraz.yaml"
 
 const usage = `usage:
-  aicatraz up [-c file] [--print] [--approval-tty dev] [--approve-build] [-- command...]
-                                 start the jail in a tmux session (prompts for 'ask'
-                                 rules appear as popups); attaches if it already runs
+  aicatraz up [-c file] [--print] [--tmux] [--detach-key key] [--approve-build] [-- command...]
+              [--status-bar bottom|off] [--bar-theme name] [--bar-fg color] [--bar-bg color]
+                                 start the jail as a session that keeps running when you
+                                 detach (Ctrl-Y; or --detach-key ctrl-<key>, or
+                                 $AICATRAZ_DETACH_KEY), with a status bar on the bottom
+                                 row (colors: see bar-colors); approval prompts for 'ask'
+                                 rules appear over the screen; attaches if it already runs
+  aicatraz down [-c file]        stop the session of this project
+  aicatraz bar-colors            show the status bar in every color theme
   aicatraz run [-c file] [--print] [--approval-tty dev] [-- command...]
                                  start the jail in this terminal (default: an
                                  interactive shell); --print shows the docker
@@ -65,12 +74,21 @@ func cli(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version":
 		fmt.Fprintf(stdout, "aicatraz %s (%s/%s, %s)\n", version, runtime.GOOS, runtime.GOARCH, runtime.Version())
 		return 0
-	case "run", "up", "shell", "claude", "opencode", "agent", "resume":
+	case "run", "up", "down", "shell", "claude", "opencode", "agent", "resume":
 		return launch(args[0], args[1:], stdout, stderr)
 	case jail.CanaryCommand: // used inside the container by the hidden-path check
 		return canary.Run(args[1:], stdout)
 	case "init":
 		return runInit(args[1:], stdout, stderr)
+	case "bar-colors":
+		w := 80
+		if f, ok := stdout.(*os.File); ok {
+			if cols, _, err := term.GetSize(int(f.Fd())); err == nil {
+				w = cols
+			}
+		}
+		mux.Preview(stdout, w, ui.For(stdout).Enabled())
+		return 0
 	case "completion":
 		return runCompletion(args[1:], stdout, stderr)
 	case "sessions":
@@ -97,6 +115,13 @@ func cli(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		return 2
+	case jail.MuxServeCommand: // the detached process behind `up`
+		code, err := jail.ServeMux(args[1:])
+		if err != nil {
+			ui.Error(stderr, "%v", err)
+			return 2
+		}
+		return code
 	case jail.UpEnvCommand: // used inside the tmux session: restore the saved environment, then run
 		if len(args) < 3 {
 			return 2
@@ -162,7 +187,28 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		case (a == "-c" || a == "--config") && len(args) >= 2:
 			opts.ConfigPath = args[1]
 			args = args[2:]
-		case a == "--approve-build" && verb != "shell":
+		case a == "--detach-key" && len(args) >= 2 && verb == "up":
+			opts.DetachKey = args[1]
+			args = args[2:]
+		case a == "--bar-theme" && len(args) >= 2 && verb == "up":
+			opts.BarTheme = args[1]
+			args = args[2:]
+		case a == "--bar-fg" && len(args) >= 2 && verb == "up":
+			opts.BarFG = args[1]
+			args = args[2:]
+		case a == "--bar-bg" && len(args) >= 2 && verb == "up":
+			opts.BarBG = args[1]
+			args = args[2:]
+		case a == "--status-bar" && len(args) >= 2 && verb == "up":
+			opts.StatusBar = args[1]
+			args = args[2:]
+		case a == "--tmux" && verb == "up":
+			opts.Tmux = true
+			args = args[1:]
+		case a == "--approval-sock" && len(args) >= 2 && verb == "run":
+			opts.ApprovalSock = args[1]
+			args = args[2:]
+		case a == "--approve-build" && verb != "shell" && verb != "down":
 			opts.ApproveBuild = true
 			args = args[1:]
 		case a == "--approval-tty" && len(args) >= 2 && verb != "shell":
@@ -207,6 +253,8 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 	switch verb {
 	case "up":
 		code, err = jail.Up(opts)
+	case "down":
+		err = jail.Down(opts)
 	case "shell":
 		opts.Command = rest
 		code, err = jail.Shell(opts)

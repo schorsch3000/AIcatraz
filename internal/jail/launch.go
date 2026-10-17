@@ -21,6 +21,7 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/broker"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/mux"
 	"github.com/schorsch3000/aicatraz/internal/pins"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
@@ -31,6 +32,13 @@ type Options struct {
 	Command      []string // run this instead of an interactive shell
 	Print        bool     // show what would run, change nothing
 	ApprovalTTY  string   // prompt for `ask` rules on this terminal device instead of tmux
+	ApprovalSock string   // prompt for `ask` rules through this session socket (set by `up`)
+	Tmux         bool     // `up` uses tmux instead of the built-in multiplexer
+	DetachKey    string   // the key that detaches from an `up` session, such as "ctrl-y"
+	StatusBar    string   // `up`'s status bar: bottom (default) or off
+	BarTheme     string   // color theme of the bar
+	BarFG        string   // text color of the bar
+	BarBG        string   // background color of the bar
 	ApproveBuild bool     // pin changed build files without asking
 	Agent        string   // start this coding agent ("@config" for the configured one)
 	AgentArgs    []string // arguments for the agent
@@ -231,7 +239,7 @@ func Launch(o Options) (int, error) {
 		go w.run(stopWatch)
 	}
 	started := time.Now()
-	code, err := runDocker(runArgs, o)
+	code, err := runDocker(runArgs, o, in.Name)
 	close(stopWatch)
 	if w != nil && w.wasTripped() {
 		return ExitExposed, nil
@@ -337,7 +345,14 @@ func inspectVolumes(vols []config.Volume) (map[string]bool, error) {
 }
 
 // runDocker runs `docker run` attached to our terminal and returns its exit code.
-func runDocker(args []string, o Options) (int, error) {
+// killGrace is how long a container gets to stop after SIGTERM or SIGHUP
+// before it is killed. An interactive shell ignores SIGTERM, so without this
+// `down` would leave the jail running.
+const killGrace = 3 * time.Second
+
+// runDocker runs docker with our terminal. container, if set, names the
+// container to kill when we are told to stop and it doesn't.
+func runDocker(args []string, o Options, container string) (int, error) {
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, o.Stdout, o.Stderr
 
@@ -353,6 +368,9 @@ func runDocker(args []string, o Options) (int, error) {
 			// The terminal already delivers SIGINT to docker; forward the rest.
 			if s != syscall.SIGINT {
 				_ = cmd.Process.Signal(s)
+				if container != "" {
+					time.AfterFunc(killGrace, func() { exec.Command("docker", "kill", container).Run() })
+				}
 			}
 		}
 	}()
@@ -414,6 +432,10 @@ func chooseApprover(cfg *config.Config, o Options, runDir string) approve.Approv
 		say("approvals are shown on %s", o.ApprovalTTY)
 		return &approve.TTY{Path: o.ApprovalTTY}
 	}
+	if o.ApprovalSock != "" {
+		say("approvals are shown in the session (attach with `aicatraz up`)")
+		return &mux.Approver{Sock: o.ApprovalSock}
+	}
 	pane := os.Getenv("TMUX_PANE")
 	if os.Getenv("TMUX") != "" && pane != "" {
 		tmux, err := exec.LookPath("tmux")
@@ -423,6 +445,6 @@ func chooseApprover(cfg *config.Config, o Options, runDir string) approve.Approv
 			return &approve.Tmux{Tmux: tmux, Pane: pane, Self: self, Dir: runDir}
 		}
 	}
-	say("no approval terminal: `ask` rules will be denied (start with `aicatraz up` inside tmux, or pass --approval-tty)")
+	say("no approval terminal: `ask` rules will be denied (start with `aicatraz up`, or pass --approval-tty)")
 	return nil
 }
