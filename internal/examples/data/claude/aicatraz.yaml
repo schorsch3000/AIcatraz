@@ -5,6 +5,7 @@
 # remember), and copies your Claude settings in.
 volumes:
   - {{PROJECT}}:rw
+  - {{PROJECT}}/aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
 
 agent:
   tool: claude
