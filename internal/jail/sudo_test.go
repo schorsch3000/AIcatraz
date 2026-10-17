@@ -94,3 +94,34 @@ func TestSudoInstaller(t *testing.T) {
 		t.Error("no os-release must not get an installer")
 	}
 }
+
+func TestRunArgsNetworkModes(t *testing.T) {
+	network := func(yaml string) []string {
+		args, err := RunArgs(testInput(t, yaml))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return args
+	}
+	// No section, or `off`: the jail has no network at all.
+	for _, yaml := range []string{"volumes:\n  - ~/p:rw\n", "network: off\nvolumes:\n  - ~/p:rw\n"} {
+		args := network(yaml)
+		if !has(args, "--network", "none") || !slices.Contains(args, "--hostname") {
+			t.Errorf("%q: the network must be none: %v", yaml, args)
+		}
+	}
+	// open: Docker's normal network, left alone.
+	if args := network("network: open\nvolumes:\n  - ~/p:rw\n"); slices.Contains(args, "--network") || !slices.Contains(args, "--hostname") {
+		t.Errorf("open must not touch the network: %v", args)
+	}
+	// filtered: the sidecar's network, and no hostname of its own.
+	in := testInput(t, "network: {}\nvolumes:\n  - ~/p:rw\n")
+	in.NetworkContainer = "sidecar-1"
+	args, err := RunArgs(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has(args, "--network", "container:sidecar-1") || slices.Contains(args, "--hostname") || has(args, "--network", "none") {
+		t.Errorf("filtered joins the sidecar: %v", args)
+	}
+}

@@ -428,3 +428,55 @@ func TestNetworkSectionErrors(t *testing.T) {
 		t.Errorf("%+v", ps)
 	}
 }
+
+func TestNetworkModes(t *testing.T) {
+	for yaml, want := range map[string]NetMode{
+		"volumes: []\n":              NetOff, // no section: no network
+		"network: off\n":             NetOff,
+		"network: none\n":            NetOff,
+		"network: false\n":           NetOff,
+		"network: open\n":            NetOpen,
+		"network: true\n":            NetOpen,
+		"network: {}\n":              NetFiltered,
+		"network: {default: deny}\n": NetFiltered,
+		"network:\n  rules:\n    - {to: a.example.com, decision: allow}\n": NetFiltered,
+	} {
+		cfg, ps := Parse([]byte(yaml), opts)
+		if len(ps) != 0 || cfg.NetworkMode() != want {
+			t.Errorf("%q: mode %q, problems %+v, want %q", yaml, cfg.NetworkMode(), ps, want)
+		}
+	}
+	if cfg, _ := Parse([]byte("network: open\n"), opts); len(cfg.NetRules) != 0 {
+		t.Error("open has no rules")
+	}
+}
+
+func TestNetworkSectionIsStrict(t *testing.T) {
+	for yaml, want := range map[string]string{
+		"network: maybe\n":           "off, open, or a mapping",
+		"network: [a]\n":             "off, open, or a mapping",
+		"network: {defualt: deny}\n": "field defualt not found",
+		"network: {rules: [{to: a.com, decision: allow, port: 80}]}\n": "field port not found",
+	} {
+		_, ps := Parse([]byte(yaml), opts)
+		found := false
+		for _, p := range ps {
+			found = found || strings.Contains(p.Msg, want)
+		}
+		if !found {
+			t.Errorf("%q: want %q, got %+v", yaml, want, ps)
+		}
+	}
+}
+
+func TestAgentWithoutNetworkIsWarnedAbout(t *testing.T) {
+	_, ps := Parse([]byte("agent: {tool: claude}\n"), opts)
+	if len(ps) != 1 || ps[0].Severity != Warning || !strings.Contains(ps[0].Msg, "network is off") {
+		t.Errorf("an agent without a network: %+v", ps)
+	}
+	for _, yaml := range []string{"agent: {tool: claude}\nnetwork: open\n", "agent: {tool: claude}\nnetwork: {default: ask}\n", "network: off\n"} {
+		if _, ps := Parse([]byte(yaml), opts); len(ps) != 0 {
+			t.Errorf("%q: %+v", yaml, ps)
+		}
+	}
+}

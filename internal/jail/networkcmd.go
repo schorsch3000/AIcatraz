@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/egress"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
@@ -51,9 +52,12 @@ func Network(args []string, stdout, stderr io.Writer) error {
 		if len(rest) != 1 {
 			return errors.New(networkUsage)
 		}
-		if cfg.Network == nil {
-			fmt.Fprintln(stdout, "this config has no network section: the network is open")
-		} else {
+		switch cfg.NetworkMode() {
+		case config.NetOff:
+			fmt.Fprintln(stdout, "the network is off: the jail has none (no network section, or `network: off`)")
+		case config.NetOpen:
+			fmt.Fprintln(stdout, "the network is open: `network: open` lets the jail connect anywhere")
+		default:
 			fmt.Fprintf(stdout, "%s  default: %s, dns: %s\n", st.Bold("config"), cfg.Network.DefaultOrAsk(), orDefault(cfg.Network.DNS, "open"))
 			for i, r := range cfg.NetRules {
 				fmt.Fprintf(stdout, "  %2d  %s\n", i+1, egress.FormatRule(r))

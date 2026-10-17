@@ -45,7 +45,9 @@ const usage = `usage:
                                  open another shell in the running jail
   aicatraz claude|opencode [flags] [-- agent arguments...]
                                  start a coding agent in the jail (installed on first
-                                 use, with your configuration copied in)
+                                 use, with your configuration copied in); in a terminal it
+                                 runs as an up session (flags as for up, --no-session to
+                                 run it directly)
   aicatraz agent [flags] [-- agent arguments...]
                                  start the agent named by agent.tool in the config
   aicatraz sessions              list the agent sessions of this project
@@ -57,6 +59,8 @@ const usage = `usage:
   aicatraz network [-c file] forget <number> | --all
                                  change the remembered rules (also in a running session)
   aicatraz pins [-c file] list   show the files whose approved version is remembered
+  aicatraz pins [-c file] diff [<path>...]
+                                 show what changed in pinned files since they were approved
   aicatraz pins [-c file] forget <path>... | --missing | --all
                                  forget pins; the next run asks again
   aicatraz tools [list | install <tool> [version] [--from-host] | update [tool...]]
@@ -192,6 +196,8 @@ func configCheck(file string, stdout, stderr io.Writer) int {
 func launch(verb string, args []string, stdout, stderr io.Writer) int {
 	opts := jail.Options{ConfigPath: defaultConfig, Stdout: stdout, Stderr: stderr}
 	agentVerb := verb == "claude" || verb == "opencode" || verb == "agent" || verb == "resume"
+	sessionVerb := verb == "up" || agentVerb // verbs that can run as a session you can detach from
+	noSession := false
 	switch verb {
 	case "claude", "opencode":
 		opts.Agent = verb
@@ -212,21 +218,24 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		case (a == "-c" || a == "--config") && len(args) >= 2:
 			opts.ConfigPath = args[1]
 			args = args[2:]
-		case a == "--detach-key" && len(args) >= 2 && verb == "up":
+		case a == "--detach-key" && len(args) >= 2 && sessionVerb:
 			opts.DetachKey = args[1]
 			args = args[2:]
-		case a == "--bar-theme" && len(args) >= 2 && verb == "up":
+		case a == "--bar-theme" && len(args) >= 2 && sessionVerb:
 			opts.BarTheme = args[1]
 			args = args[2:]
-		case a == "--bar-fg" && len(args) >= 2 && verb == "up":
+		case a == "--bar-fg" && len(args) >= 2 && sessionVerb:
 			opts.BarFG = args[1]
 			args = args[2:]
-		case a == "--bar-bg" && len(args) >= 2 && verb == "up":
+		case a == "--bar-bg" && len(args) >= 2 && sessionVerb:
 			opts.BarBG = args[1]
 			args = args[2:]
-		case a == "--status-bar" && len(args) >= 2 && verb == "up":
+		case a == "--status-bar" && len(args) >= 2 && sessionVerb:
 			opts.StatusBar = args[1]
 			args = args[2:]
+		case a == "--no-session" && agentVerb:
+			noSession = true
+			args = args[1:]
 		case a == "--tmux" && verb == "up":
 			opts.Tmux = true
 			args = args[1:]
@@ -284,13 +293,26 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		opts.Command = rest
 		code, err = jail.Shell(opts)
 	default:
-		code, err = jail.Launch(opts)
+		// An agent runs as a session (you can detach, and approval prompts have
+		// somewhere to appear) unless that is switched off, there is no terminal
+		// to attach, or you named a terminal for the prompts yourself.
+		if agentVerb && !noSession && opts.ApprovalTTY == "" && isTerminalPair(stdout) {
+			code, err = jail.Up(opts)
+		} else {
+			code, err = jail.Launch(opts)
+		}
 	}
 	if err != nil {
 		ui.Error(stderr, "%v", err)
 		return 2
 	}
 	return code
+}
+
+// isTerminalPair reports whether stdin and out are both terminals.
+func isTerminalPair(out io.Writer) bool {
+	f, ok := out.(*os.File)
+	return ok && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(f.Fd()))
 }
 
 // chooseSession finds the session `resume` continues.

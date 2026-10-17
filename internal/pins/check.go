@@ -166,6 +166,15 @@ func compare(path string, now Snapshot, pinned *Snapshot) Item {
 	return it
 }
 
+// DiffFor makes the unified diff between an approved version and the file as
+// it is now (now may not exist), or says why there is none.
+func DiffFor(path string, pinned *Snapshot, now Snapshot) (diff, note string) {
+	if !now.Exists {
+		return diffOf(path, pinned.Content, nil, 0, pinned.Size)
+	}
+	return diffOf(path, pinned.Content, now.Content, now.Size, pinned.Size)
+}
+
 // diffOf makes a unified diff of two versions, or says why it can't.
 func diffOf(path string, old, now []byte, nowSize, oldSize int64) (diff, note string) {
 	if (old == nil && oldSize > 0) || (now == nil && nowSize > 0) {

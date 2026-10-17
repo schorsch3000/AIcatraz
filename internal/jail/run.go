@@ -69,9 +69,13 @@ func RunArgs(in RunInput) ([]string, error) {
 		args = append(args, "-t")
 	}
 	args = append(args, "--name", in.Name)
-	if in.NetworkContainer != "" {
+	switch {
+	case in.NetworkContainer != "":
+		// The sidecar's network, and with it its hostname.
 		args = append(args, "--network", "container:"+in.NetworkContainer)
-	} else {
+	case cfg.NetworkMode() == config.NetOff:
+		args = append(args, "--network", "none", "--hostname", hostname(in.ID))
+	default:
 		args = append(args, "--hostname", hostname(in.ID))
 	}
 	args = append(args,

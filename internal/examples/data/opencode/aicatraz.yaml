@@ -7,6 +7,13 @@ volumes:
   - .:rw
   - ./aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
 
+# The jail has no network unless you say so, and opencode needs the service of
+# your model provider. This asks about each host the first time (answer p to
+# remember it, e to change the ports). `network: open` would allow everything;
+# rules like {to: api.openai.com, ports: 443, decision: allow} fix the hosts.
+network:
+  default: ask
+
 agent:
   tool: opencode
   skip_permissions: true   # the jail is the boundary, so opencode's own prompts are redundant

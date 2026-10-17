@@ -228,13 +228,89 @@ func (p Problem) FormatStyled(file string, st ui.Style) string {
 	return fmt.Sprintf("%s: %s: %s", st.Bold(loc), label, p.Msg)
 }
 
-// Network limits what the jail may connect to. Without this section the
-// network is open.
+// NetMode says how the jail is connected.
+type NetMode string
+
+const (
+	NetOff      NetMode = "off"      // no network at all (the default)
+	NetOpen     NetMode = "open"     // the normal Docker network, unchecked
+	NetFiltered NetMode = "filtered" // every connection is checked against the rules
+)
+
+// Network is the `network` section: `off`, `open`, or a mapping of rules that
+// limit what the jail may connect to. Without the section the jail has no
+// network.
 type Network struct {
+	Mode      NetMode   `yaml:"-"`
 	Default   string    `yaml:"default"`   // what a connection no rule covers does: ask (default) or deny
 	DNS       string    `yaml:"dns"`       // open (default): names resolve unless a rule refuses them; restricted: only names a rule covers
 	Resolvers []string  `yaml:"resolvers"` // upstream DNS servers (default: the host's)
 	Rules     []NetRule `yaml:"rules"`
+}
+
+// NetworkMode is how the jail is connected: off unless the config says otherwise.
+func (c *Config) NetworkMode() NetMode {
+	if c.Network == nil || c.Network.Mode == "" {
+		return NetOff
+	}
+	return c.Network.Mode
+}
+
+// UnmarshalYAML reads `network: off`, `network: open` or a mapping. Unknown
+// keys are errors, as everywhere in the config.
+func (n *Network) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		switch strings.ToLower(node.Value) {
+		case "off", "none", "false", "no":
+			n.Mode = NetOff
+		case "open", "on", "true":
+			n.Mode = NetOpen
+		default:
+			return fmt.Errorf("line %d: network must be off, open, or a mapping with rules, got %q", node.Line, node.Value)
+		}
+		return nil
+	case yaml.MappingNode:
+		if err := checkKeys(node, "network", "default", "dns", "resolvers", "rules"); err != nil {
+			return err
+		}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value == "rules" {
+				for _, r := range node.Content[i+1].Content {
+					if err := checkKeys(r, "a network rule", "to", "ports", "proto", "decision"); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		type plain Network
+		var aux plain
+		if err := node.Decode(&aux); err != nil {
+			return err
+		}
+		*n = Network(aux)
+		n.Mode = NetFiltered
+		return nil
+	}
+	return fmt.Errorf("line %d: network must be off, open, or a mapping with rules", node.Line)
+}
+
+// checkKeys reports the first key of a mapping node that is not allowed.
+func checkKeys(n *yaml.Node, what string, allowed ...string) error {
+	if n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		ok := false
+		for _, a := range allowed {
+			ok = ok || k.Value == a
+		}
+		if !ok {
+			return fmt.Errorf("line %d: field %s not found in %s", k.Line, k.Value, what)
+		}
+	}
+	return nil
 }
 
 // DefaultOrAsk is the decision for connections no rule covers.

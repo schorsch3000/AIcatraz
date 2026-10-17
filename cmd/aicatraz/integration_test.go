@@ -242,7 +242,7 @@ func TestImageWithOtherUser(t *testing.T) {
 func TestSudo(t *testing.T) {
 	p := newProject(t)
 	p.write(".env", "SECRET=1\n")
-	p.write("aicatraz.yaml", "project: {id: it-sudo}\nimage: debian:stable-slim\nsudo: true\nvolumes:\n  - ~/p:rw\n  - ~/p/.env:hi\n")
+	p.write("aicatraz.yaml", "project: {id: it-sudo}\nimage: debian:stable-slim\nsudo: true\nnetwork: open # apt needs it\nvolumes:\n  - ~/p:rw\n  - ~/p/.env:hi\n")
 	exec.Command("docker", "rmi", "-f", "aicatraz/it-sudo:sudo").Run()
 	t.Cleanup(func() { exec.Command("docker", "rmi", "-f", "aicatraz/it-sudo:sudo").Run() })
 
@@ -1725,5 +1725,83 @@ func TestNetworkPrintShowsTheSidecar(t *testing.T) {
 	}
 	if strings.Contains(jailLine, "--hostname") || !strings.Contains(side, "--hostname") || !strings.Contains(side, "disable_ipv6=1") || !strings.HasSuffix(side, "9.9.9.9") {
 		t.Errorf("hostname, ipv6 and resolvers:\n%s\n%s", side, jailLine)
+	}
+}
+
+// In a terminal an agent runs as a session: approval prompts appear over its
+// screen, and it can be detached from.
+func TestAgentVerbRunsAsASession(t *testing.T) {
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skip("make is not installed on the host")
+	}
+	p := newProject(t)
+	p.write("Makefile", "deploy:\n\t@echo DEPLOYED-ON-HOST\n")
+	p.write("aicatraz.yaml", "project: {id: it-agentsession}\nvolumes:\n  - ~/p:rw\nrules:\n  - command: make\n    args: [deploy]\n    decision: ask\n")
+	p.installFake("claude", "1.0.0", "#!/bin/sh\necho \"FAKE-AGENT-UP\"\nmake deploy; echo \"make-rc=$?\"\nread line; echo \"FAKE-GOT:$line\"\nexit 5\n")
+	p.removeImage("it-agentsession")
+	down := func() {
+		cmd := exec.Command(bin, "down", "-c", filepath.Join(p.dir, "aicatraz.yaml"))
+		cmd.Env = append(os.Environ(), "HOME="+p.home, "XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
+		cmd.Run()
+	}
+	t.Cleanup(down)
+
+	tm := p.startTerm("claude", "--approve-build")
+	tm.expect("FAKE-AGENT-UP", 120*time.Second)
+	tm.expect("detach with Ctrl-Y", 5*time.Second)
+	tm.expect("ON THE HOST", 20*time.Second) // the agent's `make deploy` asks, over its screen
+	time.Sleep(900 * time.Millisecond)
+	tm.send("y")
+	tm.expect("DEPLOYED-ON-HOST", 20*time.Second)
+	tm.expect("make-rc=0", 5*time.Second)
+	tm.send("hi\r")
+	tm.expect("FAKE-GOT:hi", 5*time.Second)
+	if code := tm.wait(20 * time.Second); code != 5 {
+		t.Errorf("the agent's exit code must come through the session: %d", code)
+	}
+}
+
+func TestAgentVerbNoSessionRunsInTheTerminal(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\n")
+	p.installFake("claude", "1.0.0", "#!/bin/sh\necho DIRECT-RUN\n")
+	tm := p.startTerm("claude", "--no-session", "--approve-build")
+	tm.expect("DIRECT-RUN", 120*time.Second)
+	if code := tm.wait(20 * time.Second); code != 0 {
+		t.Errorf("exit %d", code)
+	}
+	if strings.Contains(tm.screen(), "detach with") {
+		t.Errorf("--no-session must not start a session:\n%s", tm.screen())
+	}
+}
+
+// Without a network section the jail has no network at all; `network: open`
+// is the normal Docker network.
+func TestNetworkIsOffUnlessConfigured(t *testing.T) {
+	gw := bridgeGateway(t)
+	port := hello(t)
+	script := fetch(gw, port) + `echo "interfaces=$(ls /sys/class/net | tr '\n' ' ')";`
+
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\n")
+	stdout, stderr, code := p.run("bash", "-c", script)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, fmt.Sprintf("port%d=[]", port)) || !strings.Contains(stdout, "interfaces=lo ") {
+		t.Errorf("with no network section the jail must have only the loopback:\n%s", stdout)
+	}
+	if out, _, c := p.aicatraz("network", "list"); c != 0 || !strings.Contains(out, "the network is off") {
+		t.Errorf("network list: %d %s", c, out)
+	}
+	if out, _, _ := p.aicatraz("run", "--print", "--", "true"); !strings.Contains(out, "--network none") {
+		t.Errorf("--print must show --network none:\n%s", out)
+	}
+
+	q := newProject(t)
+	q.write("aicatraz.yaml", "network: open\nvolumes:\n  - ~/p:rw\n")
+	stdout, _, code = q.run("bash", "-c", script)
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("port%d=[hello-%d]", port, port)) || !strings.Contains(stdout, "eth0") {
+		t.Errorf("network: open is Docker's normal network: exit %d\n%s", code, stdout)
 	}
 }

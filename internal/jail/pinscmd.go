@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/pins"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 const pinsUsage = "usage: aicatraz pins [-c file] list\n" +
+	"       aicatraz pins [-c file] diff [<path>...]\n" +
 	"       aicatraz pins [-c file] forget <path>... | --missing | --all"
 
 // Pins implements `aicatraz pins`: look at the files whose approved version
@@ -47,7 +49,7 @@ func Pins(args []string, stdout, stderr io.Writer) error {
 	dir := filepath.Join(state, "pins")
 	if _, err := os.Stat(dir); err != nil {
 		if os.IsNotExist(err) {
-			if rest[0] == "list" || rest[0] == "forget" {
+			if rest[0] == "list" || rest[0] == "forget" || rest[0] == "diff" {
 				fmt.Fprintf(stdout, "no pins for %s\n", id)
 				return nil
 			}
@@ -64,6 +66,8 @@ func Pins(args []string, stdout, stderr io.Writer) error {
 			return errors.New(pinsUsage)
 		}
 		return listPins(store, id, stdout)
+	case "diff":
+		return diffPins(store, rest[1:], stdout)
 	case "forget":
 		return forgetPins(store, rest[1:], stdout)
 	}
@@ -209,4 +213,82 @@ func humanSize(n int64) string {
 		return fmt.Sprintf("%.1fK", float64(n)/1024)
 	}
 	return fmt.Sprintf("%.1fM", float64(n)/(1<<20))
+}
+
+// diffPins shows what changed in pinned files since they were approved:
+// the files named, or every pin that has changed or is gone.
+func diffPins(store *pins.Store, args []string, stdout io.Writer) error {
+	paths, err := store.Paths()
+	if err != nil {
+		return err
+	}
+	pinned := map[string]bool{}
+	for _, p := range paths {
+		pinned[p] = true
+	}
+	explicit := len(args) > 0
+	targets := paths
+	if explicit {
+		targets = nil
+		for _, a := range args {
+			p := a
+			if !pinned[p] {
+				abs, err := filepath.Abs(a)
+				if err != nil || !pinned[abs] {
+					return fmt.Errorf("%s is not pinned (see `%s pins list`)", a, ui.Prog)
+				}
+				p = abs
+			}
+			targets = append(targets, p)
+		}
+	}
+
+	st := ui.For(stdout)
+	shown := 0
+	for _, p := range targets {
+		state, snap, err := pinState(store, p)
+		if err != nil || snap == nil {
+			continue
+		}
+		if state == "ok" {
+			if explicit {
+				fmt.Fprintf(stdout, "%s: unchanged since it was approved\n", st.Bold(p))
+				shown++
+			}
+			continue
+		}
+		now, _ := pins.Take(p)
+		diff, note := pins.DiffFor(p, snap, now)
+		fmt.Fprintf(stdout, "%s: %s\n", st.Bold(p), st.BoldYellow(state))
+		switch {
+		case diff != "":
+			for _, l := range strings.Split(strings.TrimRight(approve.Sanitize(diff), "\n"), "\n") {
+				fmt.Fprintln(stdout, "  "+colorDiffLine(st, l))
+			}
+		case note != "":
+			fmt.Fprintln(stdout, "  "+st.Dim(note))
+		default:
+			fmt.Fprintln(stdout, "  "+st.Dim("same content, but the file is not the same one (a link)"))
+		}
+		fmt.Fprintln(stdout)
+		shown++
+	}
+	if shown == 0 {
+		fmt.Fprintln(stdout, "no pinned file has changed")
+	}
+	return nil
+}
+
+func colorDiffLine(st ui.Style, l string) string {
+	switch {
+	case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
+		return st.Bold(l)
+	case strings.HasPrefix(l, "@@"):
+		return st.Cyan(l)
+	case strings.HasPrefix(l, "+"):
+		return st.Green(l)
+	case strings.HasPrefix(l, "-"):
+		return st.Red(l)
+	}
+	return st.Dim(l)
 }

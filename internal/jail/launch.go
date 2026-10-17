@@ -153,7 +153,7 @@ func Launch(o Options) (int, error) {
 		SocketPath: filepath.Join(runDir, "broker.sock"),
 		ImagePath:  imagePath("docker", img.Ref),
 	}
-	if cfg.Network != nil {
+	if cfg.NetworkMode() == config.NetFiltered {
 		in.NetworkContainer = EgressName(id, os.Getpid())
 	}
 	var ag *agentRun
@@ -162,6 +162,9 @@ func Launch(o Options) (int, error) {
 			return 0, err
 		}
 		ag.apply(&in)
+		if cfg.NetworkMode() == config.NetOff && !o.Print {
+			ui.Note(o.Stderr, "the network is off, so the agent can't reach its service: put `network: open`, or rules, in the config")
+		}
 	}
 	runArgs, err := RunArgs(in)
 	if err != nil {
@@ -175,7 +178,7 @@ func Launch(o Options) (int, error) {
 		if cfg.Sudo {
 			fmt.Fprintf(o.Stdout, "# then, from %s: a layer with sudo and a sudoers entry for uid %d, tagged %s\n", baseRef, uid, img.Ref)
 		}
-		if cfg.Network != nil {
+		if cfg.NetworkMode() == config.NetFiltered {
 			fmt.Fprintf(o.Stdout, "# network rules: the sidecar below owns the jail's network; every connection is checked against the rules\n")
 			fmt.Fprintln(o.Stdout, shellLine("docker", egressRunArgs(in.NetworkContainer, id, os.Getpid(), self, "<run dir>/egress.sock", "<run dir>/egress.nft", cfg.Network.Resolvers)))
 		}
@@ -237,7 +240,7 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 	defer stop()
-	if cfg.Network != nil {
+	if cfg.NetworkMode() == config.NetFiltered {
 		eg, err := startEgress(cfg, id, state, runDir, approver, self, o.Stderr)
 		if err != nil {
 			return 0, err

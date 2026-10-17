@@ -31,21 +31,26 @@ type cverb struct {
 var completionTools = []string{"claude", "opencode"}
 
 var (
-	flagConfig  = cflag{"c", "config", "file", "config file to use"}
-	flagPrint   = cflag{"", "print", "", "show the docker commands, change nothing"}
-	flagBuild   = cflag{"", "approve-build", "", "approve changed build files without asking"}
-	flagTTY     = cflag{"", "approval-tty", "file", "terminal that answers approval prompts"}
-	flagAgent   = cflag{"", "agent", "tool", "start this agent"}
-	flagResume  = cflag{"", "resume", "value", "continue this agent session"}
-	flagPick    = cflag{"", "pick", "", "choose a session from a list"}
-	flagFromHst = cflag{"", "from-host", "", "copy the agent from this machine"}
-	flagDetach  = cflag{"", "detach-key", "value", "key that detaches, such as ctrl-y"}
-	flagBar     = cflag{"", "status-bar", "bar", "bottom or off"}
-	flagTheme   = cflag{"", "bar-theme", "theme", "color theme of the status bar"}
-	flagBarFG   = cflag{"", "bar-fg", "value", "text color of the status bar"}
-	flagBarBG   = cflag{"", "bar-bg", "value", "background color of the status bar"}
-	flagTmux    = cflag{"", "tmux", "", "use a tmux session instead of the built-in one"}
+	flagConfig    = cflag{"c", "config", "file", "config file to use"}
+	flagPrint     = cflag{"", "print", "", "show the docker commands, change nothing"}
+	flagBuild     = cflag{"", "approve-build", "", "approve changed build files without asking"}
+	flagTTY       = cflag{"", "approval-tty", "file", "terminal that answers approval prompts"}
+	flagAgent     = cflag{"", "agent", "tool", "start this agent"}
+	flagResume    = cflag{"", "resume", "value", "continue this agent session"}
+	flagPick      = cflag{"", "pick", "", "choose a session from a list"}
+	flagFromHst   = cflag{"", "from-host", "", "copy the agent from this machine"}
+	flagDetach    = cflag{"", "detach-key", "value", "key that detaches, such as ctrl-y"}
+	flagBar       = cflag{"", "status-bar", "bar", "bottom or off"}
+	flagTheme     = cflag{"", "bar-theme", "theme", "color theme of the status bar"}
+	flagBarFG     = cflag{"", "bar-fg", "value", "text color of the status bar"}
+	flagBarBG     = cflag{"", "bar-bg", "value", "background color of the status bar"}
+	flagNoSession = cflag{"", "no-session", "", "run the agent in this terminal, not as a session"}
+	flagTmux      = cflag{"", "tmux", "", "use a tmux session instead of the built-in one"}
 )
+
+// agentFlags are the flags of the verbs that start an agent: they run as a
+// session, so they take the session's flags.
+var agentFlags = []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagNoSession, flagDetach, flagBar, flagTheme, flagBarFG, flagBarBG}
 
 var completionVerbs = []cverb{
 	{name: "up", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagAgent, flagResume}},
@@ -53,14 +58,14 @@ var completionVerbs = []cverb{
 	{name: "down", desc: "stop the session of this project", flags: []cflag{flagConfig}},
 	{name: "run", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagAgent, flagResume}},
 	{name: "shell", desc: "open another shell in the running jail", flags: []cflag{flagConfig}},
-	{name: "claude", desc: "start Claude Code in the jail", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild}},
-	{name: "opencode", desc: "start opencode in the jail", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild}},
-	{name: "agent", desc: "start the agent named in the config", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild}},
+	{name: "claude", desc: "start Claude Code in the jail", flags: agentFlags},
+	{name: "opencode", desc: "start opencode in the jail", flags: agentFlags},
+	{name: "agent", desc: "start the agent named in the config", flags: agentFlags},
 	{name: "sessions", desc: "list the agent sessions of this project", flags: []cflag{flagConfig}},
-	{name: "resume", desc: "continue an agent session", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagPick}},
+	{name: "resume", desc: "continue an agent session", flags: append(append([]cflag{}, agentFlags...), flagPick)},
 	{name: "tools", desc: "manage the cached agent executables", flags: []cflag{flagFromHst}, first: []string{"list", "install", "update"}, later: "tool"},
 	{name: "network", desc: "show or change the network rules", flags: []cflag{flagConfig, {"", "ports", "value", "ports to allow or deny"}, {"", "all", "", "forget every remembered rule"}}, first: []string{"list", "allow", "deny", "forget"}},
-	{name: "pins", desc: "list or forget approved file versions", flags: []cflag{flagConfig, {"", "all", "", "forget every pin"}, {"", "missing", "", "forget pins of files that are gone"}}, first: []string{"list", "forget"}, later: "file"},
+	{name: "pins", desc: "list or forget approved file versions", flags: []cflag{flagConfig, {"", "all", "", "forget every pin"}, {"", "missing", "", "forget pins of files that are gone"}}, first: []string{"list", "diff", "forget"}, later: "file"},
 	{name: "init", desc: "write a starter config or Dockerfile.az", flags: []cflag{
 		{"e", "example", "example", "starter to write"},
 		{"", "list", "", "list the starters"},

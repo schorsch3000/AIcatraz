@@ -8,7 +8,7 @@ image:      ...
 volumes:    [ ... ]
 env:        { static: {...}, from_host: [...] }
 sudo:       false
-network:    { default: ask, dns: open, resolvers: [...], rules: [ ... ] }
+network:    off | open | { default: ask, dns: open, resolvers: [...], rules: [ ... ] }
 limits:     { pids: 1024, memory: 2g }
 approval:   { timeout: 2m }
 canary:     { action: stop, interval: 3s }
@@ -107,7 +107,7 @@ network:
     - {to: 1.1.1.1, ports: 53, proto: udp, decision: allow}
 ```
 
-Without a `network` section the jail's network is open. With one, everything that leaves the jail is checked, over every protocol. **Needs Docker and a one-time build of a small helper image (`aicatraz/egress:1`, Debian with nftables; it needs network access once).**
+**The jail has no network unless you give it one.** With no `network` section, or `network: off`, it has only a loopback (`docker run --network none`). `network: open` gives it Docker's normal network, with nothing checked. A mapping with rules (below) checks everything that leaves the jail, over every protocol. **Rules need Docker and a one-time build of a small helper image (`aicatraz/egress:1`, Debian with nftables; it needs network access once).**
 
 | Key | Meaning |
 |---|---|
@@ -208,7 +208,7 @@ rules:
 
 The host command runs as you, in the directory the agent was in (which must lie inside a mounted volume and not in a hidden path), with a freshly built environment: a small base set (`PATH` from the broker, `HOME`, `USER`, `LANG`, `TZ`, `TERM`) plus the rule's `env_pass`. The binary is found on the broker's `PATH`; one that lives in a writable volume is never used.
 
-`aicatraz pins list` shows what the project has approved and whether each file has changed since; `aicatraz pins forget <path>... | --missing | --all` takes pins away, so the next run asks again. Forgetting is always safe: it only makes things stricter.
+`aicatraz pins list` shows what the project has approved and whether each file has changed since; `aicatraz pins diff [<path>...]` shows the changes (file contents are shown escaped); `aicatraz pins forget <path>... | --missing | --all` takes pins away, so the next run asks again. Forgetting is always safe: it only makes things stricter.
 
 **`depends_on: auto`** knows these sets: `make` (`Makefile`, `GNUmakefile`, `*.mk`, and files named by `include`), `npm`/`npx`/`pnpm`/`yarn` (`package.json`, lockfiles, `.npmrc`), `git` (`.git/config`, `.git/hooks/*`, `.gitattributes`, `.gitmodules`), script interpreters (`python*`, `bash`, `sh`, `node`, `ruby`, `perl`, `php`: the script argument), `docker` (`Dockerfile*`, compose files). For other commands list the files yourself. Pins are kept per project, outside every mount; only your `p` answer ever updates one. More than 200 dependent files can't be pinned, so such a rule asks every time.
 

@@ -339,6 +339,9 @@ func (v *validator) agent(c *Config) {
 	if a.Tool != "" && !contains(knownTools, a.Tool) {
 		v.errorf([]any{"agent", "tool"}, "unknown agent %q (known: %s)", a.Tool, strings.Join(knownTools, ", "))
 	}
+	if a.Tool != "" && c.NetworkMode() == NetOff {
+		v.warnf([]any{"agent", "tool"}, "the network is off, so %s can't reach its service: add `network: open`, or rules, to the config", a.Tool)
+	}
 	if strings.ContainsAny(a.Version, " \t") {
 		v.errorf([]any{"agent", "version"}, "invalid version %q", a.Version)
 	}
@@ -355,7 +358,7 @@ func contains(list []string, s string) bool {
 
 func (v *validator) network(c *Config) {
 	n := c.Network
-	if n == nil {
+	if n == nil || n.Mode != NetFiltered {
 		return
 	}
 	switch n.Default {

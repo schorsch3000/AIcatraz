@@ -8,7 +8,7 @@ An AI coding agent is useful because it can run commands and edit files. It is r
 
 ## What is not a goal
 
-- **Stopping exfiltration of what the agent can legitimately see.** Outbound network is open, because the agent needs its API. Anything you mount (and anything you pass in `env.from_host`, and your agent credentials, which are copied in) can be sent out. Don't mount what must stay secret; hide it (`hi`) or keep it out.
+- **Stopping exfiltration of what the agent can legitimately see.** The jail has no network unless you give it one. An agent has to be given its service (`network: open`, or rules), and then anything you mount (and anything you pass in `env.from_host`, and your agent credentials, which are copied in) can be sent out. Don't mount what must stay secret; hide it (`hi`) or keep it out.
 - **Defending against escapes from Docker or the kernel.** The jail is as strong as Docker's isolation with all capabilities dropped, `no-new-privileges`, a read-only root, and the pid and memory limits you set. It is not a hardened sandbox against a determined kernel exploit.
 - **Protecting a machine where the Docker socket is already reachable by the agent.** It never is mounted, but anyone who can use Docker as you can do anything as you.
 - Non-Linux hosts.
@@ -44,7 +44,7 @@ Everything the container sends is a *request*: command name, arguments, working 
 4. **Credentials are copied in.** For agents, your credentials file is copied into the jail's state on every launch, so everything in the jail can read it. Hooks and MCP servers in your agent settings run inside the jail.
 5. **Hidden files are only as safe as the mount.** A hidden file is `/dev/null` bind-mounted over it. If the host replaces it by rename, it is exposed; the canary notices (within its interval, or at the next host command) and stops the session by default, but in that window the agent could have read it. Hide a directory instead of a single file.
 6. **Symlinks in rw volumes** are harmless inside the jail (it can't resolve them outside its mounts), but can mislead host-side tools. `confine_paths` resolves arguments to real paths, and the working directory is always resolved.
-7. **Open network** is the default. With a `network` section the jail is limited as described below, and whatever that section cannot see (see its limits) stays open.
+7. **Network is off by default.** `network: open` gives the jail Docker's normal network, unchecked; rules limit it as described below, and whatever the rules cannot see (see their limits) stays open.
 8. **The broker is one process per session.** If it dies, the shim fails clearly instead of hanging, and nothing runs on the host. A broker that was killed hard leaves a socket directory behind, cleaned up on the next start.
 9. **`local` is not a boundary.** It runs the jail's binary in the jail; it only decides *where*, never what the agent may do inside.
 

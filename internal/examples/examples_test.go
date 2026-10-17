@@ -93,6 +93,9 @@ func TestStarterCommentedOptionsAreValid(t *testing.T) {
 		var out []string
 		on := false
 		for _, l := range strings.Split(files[ConfigFile], "\n") {
+			if l == "network: off" { // the active line; the commented mapping stands in for it
+				continue
+			}
 			switch {
 			case keys.MatchString(l):
 				on = true

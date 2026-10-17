@@ -24,7 +24,7 @@ What it does:
 - **Coding agents out of the box.** `aicatraz claude` and `aicatraz opencode` install the agent, copy your settings in, start it without its own permission prompts (the jail is the boundary), and remember the session so `aicatraz resume` can continue it.
 - **An audit log** of every request, decision and exit.
 
-What it deliberately does **not** do: stop the agent from using the network (it needs its API), or from reading and sending out what you mounted. It contains the scope, not the secrets inside the scope. See [docs/security.md](docs/security.md) for the threat model and the known risks.
+The jail has **no network** unless the config gives it one (`network: open`, or rules that limit it). What it deliberately does **not** do: stop an agent you let connect from sending out what you mounted. It contains the scope, not the secrets inside the scope. See [docs/security.md](docs/security.md) for the threat model and the known risks.
 
 ## Requirements
 
@@ -99,7 +99,7 @@ aicatraz sessions                        # later: list sessions...
 aicatraz resume                          # ...and continue the last one
 ```
 
-For prompts to appear while the agent works, start it with `aicatraz up --agent claude`: the prompt is drawn over the agent's screen, and you answer it there. Or give a terminal of your own: `--approval-tty /dev/pts/N`. Without either, `ask` rules are denied, and the denial says why.
+In a terminal, `aicatraz claude` (and `opencode`, `agent`, `resume`) runs the agent as an `aicatraz up` session: prompts for `ask` rules are drawn over the agent's screen and you answer them there, you can detach with Ctrl-Y and come back with `aicatraz up`, and the status bar shows. `--no-session` runs it directly in the terminal instead. Or give a terminal of your own: `--approval-tty /dev/pts/N`. Without either, `ask` rules are denied, and the denial says why.
 
 ## Commands
 
@@ -115,10 +115,11 @@ For prompts to appear while the agent works, start it with `aicatraz up --agent 
 | `aicatraz network [-c file] list` | Show the network rules of the config and the ones remembered from prompts. |
 | `aicatraz network [-c file] allow\|deny <target> [--ports ...]` · `forget <number> \| --all` | Change the remembered network rules (also in a running session). |
 | `aicatraz pins [-c file] list` | Show the files whose approved version is remembered, and whether each is still as approved (`ok`, `changed`, `missing`). |
+| `aicatraz pins [-c file] diff [<path>...]` | Show what changed in pinned files since they were approved (all changed ones, or the files you name). |
 | `aicatraz pins [-c file] forget <path>... \| --missing \| --all` | Forget pins: the next time a rule runs them they need approval again. `--missing` drops pins of files that are gone. |
 | `aicatraz bar-colors` | Show the status bar in every color theme. |
 | `aicatraz shell [-- command...]` | Another shell in the running jail (a second terminal). Host commands use the same broker. |
-| `aicatraz claude` / `opencode` `[flags] [-- agent args...]` | Start that agent in the jail. Installed on first use. |
+| `aicatraz claude` / `opencode` `[flags] [-- agent args...]` | Start that agent in the jail. Installed on first use. In a terminal it runs as an `up` session (same flags; `--no-session` to run it directly). |
 | `aicatraz agent` | Start the agent named by `agent.tool` in the config. |
 | `aicatraz sessions` | List the agent sessions of this project. |
 | `aicatraz resume [id] [--pick]` | Continue the latest (or a given) agent session. |
@@ -160,7 +161,7 @@ A project is identified by the real path of its config file; set `project.id` to
 
 ## Limiting the network
 
-By default the jail can connect anywhere. A `network` section in the config limits that, for every protocol: an allowlist of host names (with `*.domain`), IP addresses and CIDR ranges, with ports as a list, a range or `*`. Whatever no rule covers is asked about, the way `ask` rules are: in the `aicatraz up` overlay you can allow it once, for the session, or for good, and change the ports before you do (`22, 80, 443, 8000-8080`).
+By default the jail has no network at all: with no `network` section, or with `network: off`, it only has a loopback. `network: open` gives it Docker's normal network, unchecked (an agent needs that or rules, to reach its service). A `network` section with rules limits it instead, for every protocol: an allowlist of host names (with `*.domain`), IP addresses and CIDR ranges, with ports as a list, a range or `*`. Whatever no rule covers is asked about, the way `ask` rules are: in the `aicatraz up` overlay you can allow it once, for the session, or for good, and change the ports before you do (`22, 80, 443, 8000-8080`).
 
 ```yaml
 network:
@@ -192,6 +193,7 @@ Names and the numbers 0 to 15 follow your terminal's color theme; 16 to 255 and 
 | You see | Because | Do |
 |---|---|---|
 | `volume ...: ... does not exist` | A hidden path must exist at launch (otherwise the agent could create it). | Create the file or directory. |
+| The agent can't reach its service, `connection refused` everywhere | The jail has no network unless the config gives it one. | Add `network: open`, or rules (see [Limiting the network](#limiting-the-network)). |
 | `no approval terminal: ask rules will be denied` | Nobody can be asked. | Start with `aicatraz up`, or pass `--approval-tty`. |
 | `build files changed since they were last approved` | `Dockerfile.az` is new or changed, and there is no terminal to ask. | Run `aicatraz run` interactively once and answer `p`, or pass `--approve-build`. |
 | `the image ... has no glibc dynamic loader` | The agents don't run on Alpine. | Use a Debian/Ubuntu-based image. |
@@ -228,6 +230,8 @@ make release-check    # builds twice, in different directories, and compares the
 
 Builds use `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false` and no build id, so the same source and the same Go toolchain give byte-identical binaries. To verify a release: check out the tag, run `make release` with the Go version shown by `aicatraz version`, and compare `dist/SHA256SUMS`. `make release` refuses to run on a tree with uncommitted changes.
 
+Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`: it vets and tests, checks that the build is reproducible, builds both binaries and publishes them, with `SHA256SUMS`, as a GitHub release.
+
 ## License
 
-AIcatraz is free software under the GNU General Public License, version 3. See [LICENSE](LICENSE).
+AIcatraz is free software under the GNU General Public License, version 3. See [LICENSE](LICENSE). Every Go source file starts with `SPDX-License-Identifier: GPL-3.0-only`; a test keeps it that way.

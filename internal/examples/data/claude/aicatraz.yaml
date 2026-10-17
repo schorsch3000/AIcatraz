@@ -7,6 +7,14 @@ volumes:
   - .:rw
   - ./aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
 
+# The jail has no network unless you say so, and Claude needs its service.
+# This allows Anthropic's API and asks about everything else (answer p to
+# remember a host, e to change the ports). `network: open` would allow all.
+network:
+  default: ask
+  rules:
+    - {to: "*.anthropic.com", ports: 443, decision: allow}
+
 agent:
   tool: claude
   skip_permissions: true   # the jail is the boundary, so Claude's own prompts are redundant
