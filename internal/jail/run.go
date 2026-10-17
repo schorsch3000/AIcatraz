@@ -134,8 +134,10 @@ func RunArgs(in RunInput) ([]string, error) {
 	// Writable scratch space; the root filesystem is read-only. The volumes
 	// are created (and made writable for the user) before the jail starts and
 	// removed when it ends. A volume, unlike a tmpfs, is not mounted noexec.
+	// volume-nocopy stops docker from copying the image's (root-owned) mount
+	// point over the ownership createScratch set.
 	for _, sc := range ScratchDirs {
-		args = append(args, "--mount", "type=volume,src="+in.ScratchVolume(sc)+",dst="+sc.Path(in))
+		args = append(args, "--mount", "type=volume,src="+in.ScratchVolume(sc)+",dst="+sc.Path(in)+",volume-nocopy")
 	}
 	args = append(args, "--tmpfs", "/run:rw,nosuid,nodev,size=16m,mode=1777")
 

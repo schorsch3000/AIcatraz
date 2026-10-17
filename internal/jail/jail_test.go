@@ -69,7 +69,7 @@ func TestRunArgsHardening(t *testing.T) {
 	}
 	// /tmp, /var/tmp and home are volumes, not RAM.
 	for _, dst := range []string{"/tmp", "/var/tmp", "/home/u"} {
-		if !slices.Contains(args, "type=volume,src=aicatraz-proj-1-9-"+map[string]string{"/tmp": "tmp", "/var/tmp": "vartmp", "/home/u": "home"}[dst]+",dst="+dst) {
+		if !slices.Contains(args, "type=volume,src=aicatraz-proj-1-9-"+map[string]string{"/tmp": "tmp", "/var/tmp": "vartmp", "/home/u": "home"}[dst]+",dst="+dst+",volume-nocopy") {
 			t.Errorf("no scratch volume for %s in\n%s", dst, strings.Join(args, " "))
 		}
 	}
