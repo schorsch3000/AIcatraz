@@ -46,6 +46,8 @@ const usage = `usage:
   aicatraz init dockerfile [--force]
                                  write a one-line Dockerfile.az (FROM the distribution
                                  this machine runs)
+  aicatraz completion bash|zsh|fish
+                                 print shell completion code to source
   aicatraz config check [file]   validate a config (default: ` + defaultConfig + `)
   aicatraz version
 `
@@ -69,6 +71,8 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		return canary.Run(args[1:], stdout)
 	case "init":
 		return runInit(args[1:], stdout, stderr)
+	case "completion":
+		return runCompletion(args[1:], stdout, stderr)
 	case "sessions":
 		file := defaultConfig
 		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {

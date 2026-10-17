@@ -107,6 +107,7 @@ For prompts to appear while the agent works, start it with `aicatraz up --agent 
 |---|---|
 | `aicatraz init [--example name] [--list] [--force]` | Write a starter `aicatraz.yaml` (and `Dockerfile.az`) into this directory. Never overwrites without `--force`. |
 | `aicatraz init dockerfile [--force]` | Write a one-line `Dockerfile.az` (`FROM debian:13`, `FROM ubuntu:24.04`, ...) matching the distribution this machine runs. Knows Debian, Ubuntu, Fedora, Alpine, Rocky, AlmaLinux, CentOS Stream, RHEL, Arch, openSUSE, Amazon Linux and their Ubuntu and Debian derivatives. Never overwrites without `--force`. |
+| `aicatraz completion bash\|zsh\|fish` | Print shell completion code for `aicatraz` and `az`; see [Shell completion](#shell-completion). |
 | `aicatraz config check [file]` | Validate a config; warn about rules that are valid but risky. |
 | `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |
 | `aicatraz up [flags] [-- command...]` | Same, inside a tmux session (`aicatraz-<project>`), so approval prompts pop up. Attaches if it already runs. |
@@ -172,6 +173,16 @@ go test -race ./...      # a couple of minutes: the stress tests are heavy
 ```
 
 Layout: `cmd/aicatraz` (the one binary: launcher, broker, shim and CLI, chosen by the name it is started under), `internal/config` (schema and linter), `internal/jail` (container, volumes, build, tmux), `internal/broker` and `internal/shim` with `internal/proto` (the host door), `internal/policy`, `internal/pins`, `internal/approve`, `internal/canary`, `internal/agent`, `internal/examples`, `internal/ui`.
+
+## Shell completion
+
+`aicatraz completion <shell>` prints code to source. It completes commands, flags, example names, agent names and files, for both `aicatraz` and `az`.
+
+```bash
+source <(aicatraz completion bash)       # bash (add to ~/.bashrc); `sh` prints the same bash code
+source <(aicatraz completion zsh)        # zsh (add to ~/.zshrc, after compinit)
+aicatraz completion fish | source        # fish (or save to ~/.config/fish/completions/aicatraz.fish)
+```
 
 ## Releases
 
