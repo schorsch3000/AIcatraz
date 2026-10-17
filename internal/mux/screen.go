@@ -87,6 +87,13 @@ func (s *Screen) Setup() string {
 	return fmt.Sprintf("\x1b[?6l\x1b[1;%dr\x1b[1;1H", s.AgentRows())
 }
 
+// Begin sets the scroll region without moving the cursor, for a session that
+// starts where the cursor is.
+func (s *Screen) Begin() string {
+	s.dirty = true
+	return s.Margins()
+}
+
 // Margins sets the scroll region again without moving the cursor, for when
 // the terminal may have forgotten it.
 func (s *Screen) Margins() string {
@@ -247,6 +254,11 @@ func (s *Screen) csiOut(param []byte, final byte, whole []byte) []byte {
 	inter := len(param) > 0 && param[len(param)-1] >= 0x20 && param[len(param)-1] <= 0x2f
 
 	if private {
+		if param[0] == '?' && final == 'J' { // selective erase
+			if p := string(param[1:]); p == "" || p == "0" || p == "2" || p == "3" {
+				s.dirty = true
+			}
+		}
 		if param[0] == '?' && (final == 'h' || final == 'l') {
 			for _, n := range params(param[1:]) {
 				if n == 47 || n == 1047 || n == 1049 {
@@ -281,8 +293,8 @@ func (s *Screen) csiOut(param []byte, final byte, whole []byte) []byte {
 			b = h
 		}
 		return []byte(fmt.Sprintf("\x1b[%d;%dr", t, b))
-	case 'J': // erase in display: all of it takes the bar too
-		if string(param) == "2" || string(param) == "3" {
+	case 'J': // erase in display: from the cursor to the end of the screen (the default), or all of it, reaches the bar row
+		if p := string(param); p == "" || p == "0" || p == "2" || p == "3" {
 			s.dirty = true
 		}
 	}

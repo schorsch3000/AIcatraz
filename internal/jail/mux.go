@@ -41,6 +41,12 @@ const (
 	BarBGEnv     = "AICATRAZ_BAR_BG"
 )
 
+// TermLogEnv names an environment variable: if it holds a file name, `up` writes
+// a record of everything sent to the terminal and typed into it there, to find
+// out what a program does to a terminal. The file holds what was shown and
+// typed, secrets included.
+const TermLogEnv = "AICATRAZ_TERMLOG"
+
 // MuxServeCommand is the hidden subcommand that runs a session server.
 const MuxServeCommand = "__mux-serve"
 
@@ -147,7 +153,7 @@ func UpMux(o Options) (int, error) {
 	}
 
 	ui.Note(o.Stderr, "detach with %s (the session keeps running), stop it with `%s down`", key.Name, ui.Prog)
-	res, err := mux.Attach(filepath.Join(dir, mux.AttachSock), os.Stdin, os.Stdout, mux.AttachOptions{Detach: key, Bar: bar, Project: id, Colors: colors})
+	res, err := mux.Attach(filepath.Join(dir, mux.AttachSock), os.Stdin, os.Stdout, mux.AttachOptions{Detach: key, Bar: bar, Project: id, Colors: colors, LogPath: os.Getenv(TermLogEnv)})
 	if err != nil {
 		return 0, err
 	}

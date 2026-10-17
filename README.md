@@ -188,6 +188,12 @@ aicatraz up --bar-fg bright-white --bar-bg 24           # your own: a name, 0-25
 
 Names and the numbers 0 to 15 follow your terminal's color theme; 16 to 255 and `#rrggbb` look the same everywhere. To keep a choice, put it in your shell config: `AICATRAZ_BAR_THEME`, `AICATRAZ_BAR_FG` and `AICATRAZ_BAR_BG`. Colors are personal, so there is no config-file key for them.
 
+### Detaching, coming back, and a terminal that misbehaves
+
+`Ctrl-Y` (or your `--detach-key`) leaves the session running. In the same project, `aicatraz up` attaches to it again, and so does `aicatraz claude` or `opencode` (their arguments are ignored while a session runs); `aicatraz down` stops it. There is one session per project. The session starts below the command that started it and leaves your screen as it was, so when it ends, or you detach, you are where you were. When you leave, the terminal is put back into plain modes: mouse reports, bracketed paste, keyboard protocols, cursor shape and so on are switched off, whatever the program turned on.
+
+If a program still draws wrongly, or leaves the terminal in an odd state, `AICATRAZ_TERMLOG=/tmp/term.log aicatraz up ...` records everything sent to the terminal (`>`) and typed into it (`<`), with times, one quoted line each. It contains everything that was shown and typed, secrets included; share it with care. `reset` (the command) repairs a terminal by hand.
+
 ## Troubleshooting
 
 | You see | Because | Do |

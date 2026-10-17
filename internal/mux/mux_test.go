@@ -95,6 +95,10 @@ type terminal struct {
 func attach(t *testing.T, s *session) *terminal { return attachBar(t, s, BarOff) }
 
 func attachBar(t *testing.T, s *session, bar Bar) *terminal {
+	return attachWith(t, s, AttachOptions{Detach: DefaultKey, Bar: bar, Project: "proj"})
+}
+
+func attachWith(t *testing.T, s *session, o AttachOptions) *terminal {
 	t.Helper()
 	master, slave, err := pty.Open()
 	if err != nil {
@@ -115,7 +119,7 @@ func attachBar(t *testing.T, s *session, bar Bar) *terminal {
 		}
 	}()
 	go func() {
-		r, err := Attach(s.sock(), slave, slave, AttachOptions{Detach: DefaultKey, Bar: bar, Project: "proj"})
+		r, err := Attach(s.sock(), slave, slave, o)
 		if err != nil {
 			t.Errorf("attach: %v", err)
 		}
@@ -365,4 +369,100 @@ func TestNetworkPromptThroughTheSession(t *testing.T) {
 		t.Error("keys for the prompt reached the program")
 	}
 	s.stop()
+}
+
+func TestDetachGivesTheTerminalBackWhateverTheProgramDid(t *testing.T) {
+	// A program that turns on things the tracker does not follow: kitty keyboard
+	// flags set (not pushed), grapheme clustering, a cursor shape and color, and
+	// a synchronized update it never finishes.
+	s := startSession(t, `printf '\033[?1049h\033[=31;1u\033[?2027h\033[?2031h\033[1 q\033]12;#eeeeee\007\033[?2026h\033[?1003h\033[?1006h'; echo ready; sleep 30`)
+	tm := attachBar(t, s, BarBottom)
+	tm.expect("ready")
+	tm.type_(string([]byte{DefaultKey.Byte()}))
+	tm.result()
+	for _, want := range []string{"\x1b[?1049l", "\x1b[?1003l", "\x1b[?1006l", "\x1b[=0;1u", "\x1b[?2026l", "\x1b[?2027l", "\x1b[?2031l", "\x1b[0 q", "\x1b]112\x07", "\x1b[?25h", "\x1b[r"} {
+		tm.expect(want)
+	}
+	scr := tm.screen()
+	if strings.LastIndex(scr, "\x1b[?1049l") > strings.LastIndex(scr, "\x1b[r") {
+		t.Errorf("the alternate screen must be left before the scroll region is given back: %q", scr[len(scr)-200:])
+	}
+	s.stop()
+}
+
+func TestBarComesBackWhenTheProgramIsQuiet(t *testing.T) {
+	s := startSession(t, `echo ready; sleep 30`)
+	tm := attachBar(t, s, BarBottom)
+	tm.expect("ready")
+	tm.expect("Ctrl-Y detach")
+	n := strings.Count(tm.screen(), "Ctrl-Y detach")
+	// The program says nothing for a while: the bar is painted again anyway.
+	for i := 0; i < 100 && strings.Count(tm.screen(), "Ctrl-Y detach") <= n; i++ {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := strings.Count(tm.screen(), "Ctrl-Y detach"); got <= n {
+		t.Errorf("the bar was not repainted while the program was quiet (%d paints)", got)
+	}
+	s.stop()
+}
+
+func TestTermLogRecordsBothDirections(t *testing.T) {
+	s := startSession(t, `read a; echo "got:$a"; sleep 30`)
+	logPath := filepath.Join(t.TempDir(), "term.log")
+	tm := attachWith(t, s, AttachOptions{Detach: DefaultKey, Bar: BarBottom, Project: "proj", LogPath: logPath})
+	tm.type_("secret\r")
+	tm.expect("got:secret")
+	tm.type_(string([]byte{DefaultKey.Byte()}))
+	tm.result()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(data)
+	if !strings.Contains(log, ` < "secret\n"`) || !strings.Contains(log, " > ") || !strings.Contains(log, `got:secret`) || !strings.Contains(log, `\x1b[?25h`) {
+		t.Errorf("the log lacks input or output:\n%s", log)
+	}
+	if st, _ := os.Stat(logPath); st.Mode().Perm() != 0o600 {
+		t.Errorf("the log holds what was typed: mode %v", st.Mode().Perm())
+	}
+	s.stop()
+}
+
+func TestDetachKeyInKeyboardProtocols(t *testing.T) {
+	k := DefaultKey // Ctrl-Y: byte 0x19, key code 121
+	for typed, want := range map[string]int{
+		"ab\x19cd":           2,
+		"\x1b[121;5u":        0, // kitty
+		"x\x1b[121;5u":       1,
+		"\x1b[121;5:1u":      0, // with an event type: a press
+		"\x1b[121;5:2u":      0, // a repeat
+		"\x1b[121;133u":      0, // num lock is on
+		"\x1b[121;69u":       0, // caps lock is on
+		"\x1b[121:89;5u":     0, // with the shifted key reported
+		"\x1b[121;5;121u":    0, // with text
+		"\x1b[27;5;121~":     0, // xterm modifyOtherKeys
+		"\x1b[27;5;121~tail": 0,
+		"nothing here":       -1,
+		"\x1b[121;5:3u":      -1, // the release of the key is not a press
+		"\x1b[121;6u":        -1, // Ctrl-Shift-Y
+		"\x1b[121;7u":        -1, // Ctrl-Alt-Y
+		"\x1b[121;1u":        -1, // plain y
+		"\x1b[122;5u":        -1, // Ctrl-Z
+		"\x1b[27;6;121~":     -1,
+		"\x1b[27;5;122~":     -1,
+		"\x1b[A\x1b[1;5C":    -1, // arrow keys
+		"\x1b[<0;10;5M":      -1,
+	} {
+		if got := k.find([]byte(typed)); got != want {
+			t.Errorf("%q: found at %d, want %d", typed, got, want)
+		}
+	}
+	q, _ := ParseKey("ctrl-space")
+	if q.find([]byte("\x1b[32;5u")) != 0 || q.find([]byte("\x00")) != 0 {
+		t.Error("ctrl-space in both forms")
+	}
+	bs, _ := ParseKey(`ctrl-\`)
+	if bs.find([]byte("\x1b[92;5u")) != 0 {
+		t.Error("ctrl-backslash in the kitty form")
+	}
 }

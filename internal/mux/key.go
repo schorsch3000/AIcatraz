@@ -5,6 +5,8 @@ package mux
 import (
 	"bytes"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -14,7 +16,7 @@ import (
 type Key struct {
 	Name string // as shown to the user, for example "Ctrl-Y"
 	b    byte
-	csiu []byte
+	code int // the key's own code in the kitty and xterm keyboard protocols
 }
 
 // DefaultKey is Ctrl-Y. It is a plain Ctrl+letter on every keyboard layout,
@@ -70,15 +72,52 @@ func ParseKey(spec string) (Key, error) {
 	if s == "space" {
 		name = "Ctrl-Space"
 	}
-	return Key{Name: name, b: b, csiu: []byte(fmt.Sprintf("\x1b[%d;5u", base))}, nil
+	return Key{Name: name, b: b, code: base}, nil
 }
 
-// find returns where the key is in typed bytes, or -1.
+// A terminal with an enhanced keyboard mode (the kitty protocol, or xterm's
+// modifyOtherKeys) sends a Ctrl chord as an escape sequence instead of the
+// control byte: CSI code ; modifiers [: event] u, or CSI 27 ; modifiers ; code ~.
+var (
+	kittyKey = regexp.MustCompile(`\x1b\[(\d+)(?::\d*)*;(\d+)(?::(\d+))?(?:;[\d:]*)?u`)
+	xtermKey = regexp.MustCompile(`\x1b\[27;(\d+);(\d+)~`)
+)
+
+// ctrlOnly reports whether a protocol's modifier field means Ctrl and nothing
+// else but the lock keys (caps lock 64, num lock 128, which kitty adds).
+func ctrlOnly(field string) bool {
+	m, err := strconv.Atoi(field)
+	return err == nil && m >= 1 && (m-1)&^(64|128) == 4
+}
+
+// find returns where the key is in typed bytes, or -1. Only a press counts:
+// the release of a key, which the kitty protocol can report, does not.
 func (k Key) find(typed []byte) int {
+	best := -1
 	if i := bytes.IndexByte(typed, k.b); i >= 0 {
-		return i
+		best = i
 	}
-	return bytes.Index(typed, k.csiu)
+	for _, m := range kittyKey.FindAllSubmatchIndex(typed, -1) {
+		code, _ := strconv.Atoi(string(typed[m[2]:m[3]]))
+		if code != k.code || !ctrlOnly(string(typed[m[4]:m[5]])) {
+			continue
+		}
+		if m[6] >= 0 && string(typed[m[6]:m[7]]) == "3" { // a release
+			continue
+		}
+		if best < 0 || m[0] < best {
+			best = m[0]
+		}
+		break
+	}
+	for _, m := range xtermKey.FindAllSubmatchIndex(typed, -1) {
+		code, _ := strconv.Atoi(string(typed[m[4]:m[5]]))
+		if code == k.code && ctrlOnly(string(typed[m[2]:m[3]])) && (best < 0 || m[0] < best) {
+			best = m[0]
+			break
+		}
+	}
+	return best
 }
 
 // Byte is the control byte the key sends.

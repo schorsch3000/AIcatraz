@@ -11,7 +11,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -44,6 +43,7 @@ type AttachOptions struct {
 	Bar     Bar    // whether there is a status bar
 	Project string // shown on the bar
 	Colors  Colors // of the bar; zero means DefaultColors
+	LogPath string // if set, a record of what is sent to the terminal and what is typed
 }
 
 // Attach connects the terminal in/out to the session at sock until the
@@ -67,12 +67,20 @@ func Attach(sock string, in, out *os.File, o AttachOptions) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	c := &client{conn: conn, in: in, out: out, detach: o.Detach, scr: scr,
+	var tlog *termLog
+	if o.LogPath != "" {
+		if tlog, err = openTermLog(o.LogPath); err != nil {
+			return Result{}, err
+		}
+		defer tlog.Close()
+	}
+	c := &client{conn: conn, in: in, out: out, detach: o.Detach, scr: scr, log: tlog,
 		bar: BarInfo{Project: o.Project, Key: o.Detach.Name, Started: time.Now(), Colors: o.Colors}}
 	defer func() {
-		out.Write(c.leaveOverlayBytes())
-		out.Write(c.tracker.Reset())
-		out.WriteString(c.scr.Teardown())
+		c.emit(c.leaveOverlayBytes())
+		c.emit(c.tracker.Reset())
+		c.emitString(FinalReset)
+		c.emitString(c.scr.Teardown())
 		term.Restore(int(in.Fd()), old)
 	}()
 
@@ -80,11 +88,14 @@ func Attach(sock string, in, out *os.File, o AttachOptions) (Result, error) {
 	signal.Notify(winch, syscall.SIGWINCH)
 	defer signal.Stop(winch)
 
-	// Make room without erasing: scroll what is on the screen away into the
-	// terminal's scrollback, so the session starts on a blank screen and the
-	// shell's earlier output is still there afterwards.
-	fmt.Fprintf(out, "\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", int(rows)))
-	out.WriteString(scr.Setup())
+	// The session starts where the cursor is, below the command that started
+	// it, like any program, and the screen stays as it was: when the session
+	// ends or you detach, you are where you were. Only the bottom row is taken
+	// for the bar, so the cursor must not be on it: a line feed moves the cursor
+	// down, or scrolls the screen if it was on the last row, and the cursor up
+	// puts it back one row higher.
+	c.emitString("\n\x1b[A")
+	c.emitString(scr.Begin())
 	return c.run(winch)
 }
 
@@ -102,12 +113,14 @@ type client struct {
 	out  *os.File
 	wmu  sync.Mutex
 
+	log    *termLog // a record of what was shown and typed, if asked for
 	detach Key
 	scr    *Screen // keeps a row for the status bar
 	bar    BarInfo
 
 	lastOutput time.Time // when the program last wrote
 	lastBar    string    // the bar as last drawn
+	lastDraw   time.Time // when
 
 	tracker Tracker // the modes the real terminal is in because of the program
 
@@ -163,6 +176,7 @@ func (c *client) run(winch <-chan os.Signal) (Result, error) {
 		for {
 			n, err := c.in.Read(buf)
 			if n > 0 {
+				c.log.write('<', buf[:n])
 				keys <- append([]byte(nil), buf[:n]...)
 			}
 			if err != nil {
@@ -186,7 +200,7 @@ func (c *client) run(winch <-chan os.Signal) (Result, error) {
 				c.scr.Resize(int(rows), int(cols))
 				c.send(fResize, sizePayload(uint16(c.scr.AgentRows()), cols))
 				if c.overlay == nil {
-					c.out.WriteString(c.scr.Margins())
+					c.emitString(c.scr.Margins())
 					c.drawBar(true)
 				}
 			}
@@ -293,10 +307,10 @@ func (c *client) startOverlay(payload []byte) {
 	o := &overlay{id: id, cancel: cancel, keys: make(chan byte, 64), armed: time.Now().Add(armDelay), done: make(chan answerMsg, 1)}
 	c.overlay = o
 
-	c.out.Write(c.tracker.Reset())
+	c.emit(c.tracker.Reset())
 	// The alternate screen first, so it saves the program's cursor; the scroll
 	// region reset homes the cursor, and would otherwise be what is saved.
-	c.out.WriteString("\x1b[?1049h\x1b[r\x1b[2J\x1b[H\x1b[?25l") // the prompt gets the whole screen
+	c.emitString("\x1b[?1049h\x1b[r\x1b[2J\x1b[H\x1b[?25l") // the prompt gets the whole screen
 	go func() {
 		var text string
 		var err error
@@ -365,8 +379,8 @@ func (c *client) leaveOverlayBytes() []byte {
 // it is asked to repaint instead of replaying what was held back.
 func (c *client) endOverlay() {
 	c.overlay = nil
-	c.out.WriteString("\x1b[?25h\x1b[?1049l")
-	c.out.WriteString(c.scr.Margins())
+	c.emitString("\x1b[?25h\x1b[?1049l")
+	c.emitString(c.scr.Margins())
 	c.write(c.tracker.Preamble())
 	c.drawBar(true)
 	held, lost := c.held, c.lost
@@ -393,7 +407,7 @@ func Stop(sock string) error {
 // write sends the program's output to the terminal through the screen layer,
 // and repairs the bar if the output may have damaged it.
 func (c *client) write(p []byte) {
-	c.out.Write(c.scr.Out(p))
+	c.emit(c.scr.Out(p))
 	c.drawBar(false)
 }
 
@@ -410,8 +424,9 @@ func (c *client) drawBar(force bool) {
 	if !c.scr.TakeDirty() && !force {
 		return
 	}
-	c.lastBar = c.bar.Render(c.scr.cols, time.Now())
-	c.out.WriteString(c.scr.Draw(c.lastBar))
+	c.lastDraw = time.Now()
+	c.lastBar = c.bar.Render(c.scr.cols, c.lastDraw)
+	c.emitString(c.scr.Draw(c.lastBar))
 }
 
 // idle runs on a timer: it lets go of an output sequence that was cut short,
@@ -420,11 +435,20 @@ func (c *client) idle() {
 	now := time.Now()
 	if now.Sub(c.lastOutput) > 150*time.Millisecond {
 		if b := c.scr.FlushOut(); len(b) > 0 && c.overlay == nil {
-			c.out.Write(b)
+			c.emit(b)
 		}
 	}
-	if c.scr.Active() && c.overlay == nil && now.Sub(c.lastOutput) > 400*time.Millisecond &&
-		c.bar.Render(c.scr.cols, now) != c.lastBar {
+	// Whatever the program did, the bar comes back within a second of it going
+	// quiet: a repaint costs a few bytes, and covers anything not foreseen.
+	if c.scr.Active() && c.overlay == nil && now.Sub(c.lastOutput) > 400*time.Millisecond && now.Sub(c.lastDraw) > time.Second {
 		c.drawBar(true)
 	}
 }
+
+// emit writes bytes to the terminal.
+func (c *client) emit(b []byte) {
+	c.log.write('>', b)
+	c.out.Write(b)
+}
+
+func (c *client) emitString(s string) { c.emit([]byte(s)) }

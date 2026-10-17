@@ -153,6 +153,22 @@ func (t *Tracker) changed() (alt, other []int) {
 	return alt, other
 }
 
+// FinalReset is written when a client leaves, after the tracked modes have been
+// reset: the modes and settings TUIs are known to change and that the
+// tracker does not follow, or might have missed (an answer to a query can
+// make a program enable more than the stream shows). Extra resets are
+// harmless: they only put the terminal in the state a shell expects.
+const FinalReset = "" +
+	"\x1b[?1000l\x1b[?1001l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l" + // mouse reports
+	"\x1b[?1004l\x1b[?2004l" + // focus reports, bracketed paste
+	"\x1b[?2026l" + // an unfinished synchronized update would freeze the display
+	"\x1b[?2027l\x1b[?2031l\x1b[?2048l\x1b[?1007l" + // grapheme clustering, theme and resize reports, alternate scroll
+	"\x1b[=0;1u\x1b[>4m" + // keyboard enhancement: kitty flags, modifyOtherKeys
+	"\x1b[?1l\x1b>" + // cursor keys and keypad back to normal
+	"\x1b[?7h\x1b[?25h" + // autowrap on, cursor visible
+	"\x1b[0 q\x1b]112\x07" + // cursor shape and color back to the terminal's own
+	"\x1b(B\x1b[0m" // character set and attributes
+
 // Preamble returns what a freshly attached terminal needs to be in the state
 // the program left it in.
 func (t *Tracker) Preamble() []byte {

@@ -80,16 +80,19 @@ func TestScreenLeavesStringsAlone(t *testing.T) {
 func TestScreenRepairsTheBarWhenItMayBeDamaged(t *testing.T) {
 	s := NewScreen(BarBottom, 30, 100)
 	s.TakeDirty()
-	out(s, "text \x1b[0J \x1b[1J \x1b[K \x1b[2K")
+	out(s, "text \x1b[1J \x1b[K \x1b[2K \x1b[1K \x1b[?1J")
 	if s.TakeDirty() {
-		t.Error("erasing part of the screen can't reach the bar row")
+		t.Error("erasing above the cursor or within a line can't reach the bar row")
 	}
-	for _, in := range []string{"\x1b[2J", "\x1b[3J", "\x1b[?1049h", "\x1b[?1049l", "\x1b[?47h", "\x1b[?1047l", "\x1bc", "\x1b[!p"} {
+	// Erasing from the cursor to the end of the screen does, wherever the
+	// cursor is: the bar is below every row of the program.
+	for _, in := range []string{"\x1b[J", "\x1b[0J", "\x1b[2J", "\x1b[3J", "\x1b[?J", "\x1b[?0J", "\x1b[?2J",
+		"\x1b[?1049h", "\x1b[?1049l", "\x1b[?47h", "\x1b[?1047l", "\x1bc", "\x1b[!p"} {
 		got := out(s, in)
 		if !s.TakeDirty() {
 			t.Errorf("%q must mark the bar damaged", in)
 		}
-		if strings.Contains(in, "?") || in == "\x1bc" || in == "\x1b[!p" {
+		if strings.Contains(in, "h") || strings.Contains(in, "l") || in == "\x1bc" || in == "\x1b[!p" {
 			if !strings.Contains(got, "\x1b[1;29r") {
 				t.Errorf("%q: the scroll region must be set again: %q", in, got)
 			}
