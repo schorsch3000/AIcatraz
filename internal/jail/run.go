@@ -77,6 +77,11 @@ func RunArgs(in RunInput) ([]string, error) {
 		args = append(args, "--network", "none", "--hostname", hostname(in.ID))
 	default:
 		args = append(args, "--hostname", hostname(in.ID))
+		// Published ports belong to the container that owns the network: with
+		// rules that is the sidecar, which publishes them itself.
+		for _, p := range cfg.PortMaps {
+			args = append(args, "-p", p.DockerFlag())
+		}
 	}
 	args = append(args,
 		"--label", "aicatraz.project="+in.ID,

@@ -27,6 +27,7 @@ type Config struct {
 	Rules    []Rule    `yaml:"rules"`
 	Agent    Agent     `yaml:"agent"`
 	Network  *Network  `yaml:"network"`
+	Ports    []string  `yaml:"ports"`
 
 	// Sudo gives the user passwordless sudo in the jail (see docs/security.md
 	// for what that costs). Default off.
@@ -34,6 +35,8 @@ type Config struct {
 
 	// Resolved is filled in by validation: volumes with ~ expanded and the mode parsed.
 	Resolved []Volume `yaml:"-"`
+	// PortMaps is filled in by validation: the published ports, parsed.
+	PortMaps []PortMap `yaml:"-"`
 	// NetRules is filled in by validation: the network rules, parsed.
 	NetRules []egress.Rule `yaml:"-"`
 }

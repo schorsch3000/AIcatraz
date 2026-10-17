@@ -480,3 +480,56 @@ func TestAgentWithoutNetworkIsWarnedAbout(t *testing.T) {
 		}
 	}
 }
+
+func TestPortMaps(t *testing.T) {
+	for spec, want := range map[string]string{
+		"3000":                      "127.0.0.1:3000:3000/tcp",
+		"8080:80":                   "127.0.0.1:8080:80/tcp",
+		"127.0.0.1:8080:80":         "127.0.0.1:8080:80/tcp",
+		"0.0.0.0:8080:80":           "0.0.0.0:8080:80/tcp",
+		"192.168.1.5:9000:9000/udp": "192.168.1.5:9000:9000/udp",
+		"8080:80/TCP":               "127.0.0.1:8080:80/tcp",
+		"8000-8010:8000-8010":       "127.0.0.1:8000-8010:8000-8010/tcp",
+		"9000-9002:80-82":           "127.0.0.1:9000-9002:80-82/tcp",
+		"5000-5000:5000":            "127.0.0.1:5000:5000/tcp",
+	} {
+		pm, err := ParsePortMap(spec)
+		if err != nil || pm.DockerFlag() != want {
+			t.Errorf("%q: got %q %v, want %q", spec, pm.DockerFlag(), err, want)
+		}
+	}
+	for _, bad := range []string{"", "0", "65536", "abc", "80:", ":80", "1:2:3:4", "::1:80:80", "[::1]:80:80", "localhost:80:80", "80/sctp", "8000-8010:80", "9000-8000:9000-8000", "300.1.1.1:80:80"} {
+		if _, err := ParsePortMap(bad); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+}
+
+func TestPortsSection(t *testing.T) {
+	cfg, ps := Parse([]byte("network: open\nports: [3000, \"8080:80\", \"127.0.0.1:9090:90/udp\"]\n"), opts)
+	if len(ps) != 0 || len(cfg.PortMaps) != 3 || cfg.PortMaps[0].HostLo != 3000 || cfg.PortMaps[1].ContainLo != 80 || cfg.PortMaps[2].Proto != "udp" {
+		t.Fatalf("%+v %+v", ps, cfg.PortMaps)
+	}
+	// Rules also give the jail a network that can be published.
+	if _, ps := Parse([]byte("network: {}\nports: [3000]\n"), opts); len(ps) != 0 {
+		t.Errorf("%+v", ps)
+	}
+	check := func(yaml, want string, sev Severity) {
+		t.Helper()
+		_, ps := Parse([]byte(yaml), opts)
+		for _, p := range ps {
+			if p.Severity == sev && strings.Contains(p.Msg, want) {
+				return
+			}
+		}
+		t.Errorf("%q: want %v containing %q, got %+v", yaml, sev, want, ps)
+	}
+	check("ports: [3000]\n", "the jail has none", Error)               // no network section
+	check("network: off\nports: [3000]\n", "the jail has none", Error) // off
+	check("network: open\nports: [oops]\n", "not a port", Error)
+	check("network: open\nports: [\"8080:80\", \"8080:81\"]\n", "already published", Error)
+	check("network: open\nports: [\"0.0.0.0:8080:80\"]\n", "other machines can connect", Warning)
+	if _, ps := Parse([]byte("network: open\nports: [\"8080:80\", \"8080:80/udp\", \"127.0.0.1:8081:80\"]\n"), opts); len(ps) != 0 {
+		t.Errorf("same number on another protocol or address is no clash: %+v", ps)
+	}
+}

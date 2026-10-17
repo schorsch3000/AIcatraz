@@ -8,6 +8,7 @@ image:      ...
 volumes:    [ ... ]
 env:        { static: {...}, from_host: [...] }
 sudo:       false
+ports:      [ 3000, "8080:80" ]
 network:    off | open | { default: ask, dns: open, resolvers: [...], rules: [ ... ] }
 limits:     { pids: 1024, memory: 2g }
 approval:   { timeout: 2m }
@@ -146,6 +147,23 @@ Questions come one at a time; the next one sees the answer to the one before, so
 **Remembered rules** go to `network.json` in the project's state directory, after the rules of the config (a `deny` in the config always wins), and are picked up by running sessions. `aicatraz network list` shows both kinds, `aicatraz network forget <number> | --all` removes remembered ones, and `aicatraz network allow|deny <target> [--ports ...]` adds one without a prompt.
 
 Every decision is in the audit log (`"event":"net"`).
+
+## `ports`
+
+```yaml
+ports:
+  - 3000                  # 127.0.0.1:3000 on this machine -> port 3000 in the jail
+  - "8080:80"             # 127.0.0.1:8080 -> port 80
+  - "127.0.0.1:9090:90"   # the address written out
+  - "8000-8010:8000-8010" # ranges of the same length
+  - "5353:5353/udp"       # udp
+```
+
+Publishes ports of the jail on this machine, so that a browser (or anything else) here can reach a server that runs inside the jail. An entry is a port, `host:container`, or `address:host:container`, with an optional `/tcp` or `/udp` (tcp by default). **Without an address the port is published on 127.0.0.1 only**: this machine can connect, other machines can't. An address such as `0.0.0.0` publishes it to the network (`config check` warns).
+
+- It needs a network: with no `network` section, or `network: off`, the jail has none and `ports` is an error. With `network: open` the jail publishes the ports itself; with rules the helper container does, and incoming connections are not subject to the rules (only what the jail connects to is).
+- The server in the jail must listen on all addresses (`0.0.0.0`), not on `127.0.0.1`: a connection from outside arrives at the jail's own address, not at its loopback.
+- Anything published is reachable by every program and every user on this machine, and by every web page open in your browser. The agent can start a server there too, and it can answer a request from a page you visit. Publish what you mean to, on the narrowest address.
 
 ## `limits`
 

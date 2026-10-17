@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -1803,5 +1804,86 @@ func TestNetworkIsOffUnlessConfigured(t *testing.T) {
 	stdout, _, code = q.run("bash", "-c", script)
 	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("port%d=[hello-%d]", port, port)) || !strings.Contains(stdout, "eth0") {
 		t.Errorf("network: open is Docker's normal network: exit %d\n%s", code, stdout)
+	}
+}
+
+// ---- published ports ----
+
+func freeHostPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// serveFromTheJail starts a jail whose command listens on port 8080 and says
+// hello to the first client, and connects to it from the host.
+func serveFromTheJail(t *testing.T, p *project, hostPort int) string {
+	t.Helper()
+	cmd := exec.Command(bin, append(p.runArgs(), "sh", "-c", "echo hello-from-jail | nc -l -p 8080; echo served")...)
+	cmd.Dir = p.dir
+	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
+		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	t.Cleanup(func() { cmd.Process.Kill(); <-done })
+
+	var got string
+	for end := time.Now().Add(90 * time.Second); time.Now().Before(end); time.Sleep(300 * time.Millisecond) {
+		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", hostPort), 2*time.Second)
+		if err != nil {
+			continue
+		}
+		c.SetReadDeadline(time.Now().Add(3 * time.Second))
+		b, _ := io.ReadAll(c)
+		c.Close()
+		if len(b) > 0 {
+			got = strings.TrimSpace(string(b))
+			break
+		}
+	}
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+	}
+	if got == "" {
+		t.Fatalf("nothing came back through the published port; the jail said:\n%s", out.String())
+	}
+	return got
+}
+
+func TestPublishedPortReachesAServerInTheJail(t *testing.T) {
+	port := freeHostPort(t)
+	p := newProject(t)
+	p.write("aicatraz.yaml", fmt.Sprintf("image: alpine:3\nnetwork: open\nports: [\"%d:8080\"]\nvolumes:\n  - ~/p:rw\n", port))
+	if got := serveFromTheJail(t, p, port); got != "hello-from-jail" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPublishedPortWorksWithNetworkRules(t *testing.T) {
+	port := freeHostPort(t)
+	p := newProject(t)
+	// default deny: the jail can't connect anywhere, but a browser can still reach it.
+	p.write("aicatraz.yaml", fmt.Sprintf("image: alpine:3\nnetwork: {default: deny}\nports: [\"%d:8080\"]\nvolumes:\n  - ~/p:rw\n", port))
+	if got := serveFromTheJail(t, p, port); got != "hello-from-jail" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPortsNeedANetwork(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "ports: [3000]\nvolumes:\n  - ~/p:rw\n")
+	_, stderr, code := p.aicatraz("config", "check")
+	if code == 0 || !strings.Contains(stderr, "the jail has none") {
+		t.Errorf("exit %d: %s", code, stderr)
 	}
 }

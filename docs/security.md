@@ -72,6 +72,10 @@ With a `network` section, a helper container (the sidecar) owns the jail's netwo
   - Host commands you allow through `rules` run on the host's network, outside all of this.
   - It is only as strong as Docker's isolation: a kernel bug is still a way out.
 
+## Published ports
+
+`ports:` opens a way *into* the jail. By default a port is published on 127.0.0.1 only, so other machines can't connect, but everything on this machine can: every local user, every program, and every web page in your browser (a page can send requests to `127.0.0.1`). A server the agent starts on a published port answers all of them. Publish only what you need, keep the address narrow (`0.0.0.0` makes it reachable from the network, and `config check` warns about it), and treat a published port as an interface the agent can use to reach your browser. Incoming connections are not checked by the `network` rules; those control what the jail connects to.
+
 ## Reporting a problem
 
 This is early software with a test suite that includes an adversarial part (forged binary paths, escape sequences in arguments, symlink and `..` tricks, changed files during approval, exposed hidden paths). If you find a way around a guarantee above, please report it with the exact config and commands.

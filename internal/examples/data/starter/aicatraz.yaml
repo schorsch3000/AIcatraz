@@ -65,6 +65,14 @@ network: off
 #     - {to: 10.20.0.0/16, ports: "5432, 5433", decision: allow}
 #     - {to: 1.1.1.1, ports: 53, proto: udp, decision: allow}
 
+# Publish ports of the jail on this machine, to reach a server inside it from your
+# browser. Needs a network (`open`, or rules). Written as in docker: a port,
+# host:container, or address:host:container[/udp]. Without an address the port is on
+# 127.0.0.1 only. The server in the jail must listen on 0.0.0.0, not on 127.0.0.1.
+# ports:
+#   - 3000                       # http://127.0.0.1:3000 -> port 3000 in the jail
+#   - "8080:80"
+
 # How long an `ask` prompt waits before it counts as a deny (5s to 1h).
 # approval:
 #   timeout: 2m

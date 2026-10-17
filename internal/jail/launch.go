@@ -180,7 +180,7 @@ func Launch(o Options) (int, error) {
 		}
 		if cfg.NetworkMode() == config.NetFiltered {
 			fmt.Fprintf(o.Stdout, "# network rules: the sidecar below owns the jail's network; every connection is checked against the rules\n")
-			fmt.Fprintln(o.Stdout, shellLine("docker", egressRunArgs(in.NetworkContainer, id, os.Getpid(), self, "<run dir>/egress.sock", "<run dir>/egress.nft", cfg.Network.Resolvers)))
+			fmt.Fprintln(o.Stdout, shellLine("docker", egressRunArgs(in.NetworkContainer, id, os.Getpid(), self, "<run dir>/egress.sock", "<run dir>/egress.nft", cfg.Network.Resolvers, cfg.PortMaps)))
 		}
 		fmt.Fprintln(o.Stdout, shellLine("docker", runArgs))
 		return 0, nil

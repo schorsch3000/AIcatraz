@@ -82,6 +82,7 @@ func (v *validator) validate(c *Config) {
 	v.lint(c)
 	v.agent(c)
 	v.network(c)
+	v.ports(c)
 }
 
 func (v *validator) project(c *Config) {
@@ -441,5 +442,36 @@ func (v *validator) network(c *Config) {
 			v.warnf(at("to"), "%s is a very large range", rule.Target)
 		}
 		c.NetRules = append(c.NetRules, rule)
+	}
+}
+
+func (v *validator) ports(c *Config) {
+	if len(c.Ports) == 0 {
+		return
+	}
+	if c.NetworkMode() == NetOff {
+		v.errorf([]any{"ports"}, "ports need a network: the jail has none (add `network: open`, or rules, to the config)")
+		return
+	}
+	seen := map[string]int{}
+	for i, spec := range c.Ports {
+		p := []any{"ports", i}
+		pm, err := ParsePortMap(spec)
+		if err != nil {
+			v.errorf(p, "%v", err)
+			continue
+		}
+		for port := pm.HostLo; port <= pm.HostHi; port++ {
+			key := fmt.Sprintf("%s/%s:%d", pm.Proto, pm.HostIP, port)
+			if prev, dup := seen[key]; dup {
+				v.errorf(p, "host port %d (%s) is already published by ports[%d]", port, pm.Proto, prev)
+				break
+			}
+			seen[key] = i
+		}
+		if !pm.Loopback() {
+			v.warnf(p, "%s is published on %s: other machines can connect to it, not only this one", spec, pm.HostIP)
+		}
+		c.PortMaps = append(c.PortMaps, pm)
 	}
 }

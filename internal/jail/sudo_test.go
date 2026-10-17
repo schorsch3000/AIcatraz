@@ -125,3 +125,32 @@ func TestRunArgsNetworkModes(t *testing.T) {
 		t.Errorf("filtered joins the sidecar: %v", args)
 	}
 }
+
+func TestRunArgsPublishedPorts(t *testing.T) {
+	// With Docker's normal network the jail publishes its own ports.
+	args, err := RunArgs(testInput(t, "network: open\nports: [3000, \"0.0.0.0:8080:80\"]\nvolumes:\n  - ~/p:rw\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has(args, "-p", "127.0.0.1:3000:3000/tcp") || !has(args, "-p", "0.0.0.0:8080:80/tcp") {
+		t.Errorf("ports must be published: %v", args)
+	}
+	// With rules the sidecar owns the network and publishes them; the jail
+	// can't (Docker refuses -p together with a shared network).
+	in := testInput(t, "network: {}\nports: [3000]\nvolumes:\n  - ~/p:rw\n")
+	in.NetworkContainer = "sidecar-1"
+	args, err = RunArgs(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(args, "-p") {
+		t.Errorf("the jail must not publish ports when it shares the sidecar's network: %v", args)
+	}
+	side := egressRunArgs("sidecar-1", "proj", 1, "/bin/aicatraz", "/run/s.sock", "/run/r.nft", []string{"9.9.9.9"}, in.Cfg.PortMaps)
+	if !has(side, "-p", "127.0.0.1:3000:3000/tcp") {
+		t.Errorf("the sidecar publishes the ports: %v", side)
+	}
+	if slices.Index(side, "-p") > slices.Index(side, "--entrypoint") {
+		t.Errorf("options must come before the image: %v", side)
+	}
+}

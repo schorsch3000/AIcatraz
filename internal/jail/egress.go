@@ -36,8 +36,8 @@ func EgressName(id string, pid int) string { return fmt.Sprintf("aicatraz-egress
 // namespace the jail joins: NET_ADMIN to set the firewall, NET_BIND_SERVICE
 // for the DNS forwarder on port 53, nothing else; IPv6 is switched off; its
 // resolver is itself. The socket and the rules reach it as mounts.
-func egressRunArgs(name, id string, pid int, binary, sock, rules string, resolvers []string) []string {
-	return []string{"run", "-d", "--init",
+func egressRunArgs(name, id string, pid int, binary, sock, rules string, resolvers []string, ports []config.PortMap) []string {
+	args := []string{"run", "-d", "--init",
 		"--name", name,
 		"--hostname", hostname(id),
 		"--label", "aicatraz.project=" + id,
@@ -52,10 +52,14 @@ func egressRunArgs(name, id string, pid int, binary, sock, rules string, resolve
 		"--mount", bind(binary, "/aicatraz/aicatraz", true),
 		"--mount", bind(sock, "/aicatraz/control.sock", true),
 		"--mount", bind(rules, "/aicatraz/egress.nft", true),
+	}
+	for _, p := range ports { // the jail shares this network, so its ports are published here
+		args = append(args, "-p", p.DockerFlag())
+	}
+	return append(args,
 		"--entrypoint", "/aicatraz/aicatraz",
 		egressImage,
-		egress.SidecarCommand, "/aicatraz/control.sock", "/aicatraz/egress.nft", strings.Join(resolvers, ","),
-	}
+		egress.SidecarCommand, "/aicatraz/control.sock", "/aicatraz/egress.nft", strings.Join(resolvers, ","))
 }
 
 // ensureEgressImage builds the helper image if this machine does not have it.
@@ -170,7 +174,7 @@ func startEgress(cfg *config.Config, id, state, runDir string, approver approve.
 		os.Remove(rulesFile)
 	}
 
-	if out, err := exec.Command("docker", egressRunArgs(name, id, pid, self, sock, rulesFile, resolvers)...).CombinedOutput(); err != nil {
+	if out, err := exec.Command("docker", egressRunArgs(name, id, pid, self, sock, rulesFile, resolvers, cfg.PortMaps)...).CombinedOutput(); err != nil {
 		stop()
 		return nil, fmt.Errorf("starting the network helper: %v: %s", err, strings.TrimSpace(string(out)))
 	}

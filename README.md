@@ -172,6 +172,8 @@ network:
     - {to: 10.20.0.0/16, ports: "5432, 5433", decision: allow}
 ```
 
+`ports:` goes the other way: it publishes ports of the jail on this machine (127.0.0.1 unless you say otherwise), to reach a server inside it from your browser. It needs a network too.
+
 It runs a small helper container that owns the jail's network (built once, from Debian; needs network access that one time). See [the reference](docs/configuration.md#network) and [what it does and does not stop](docs/security.md#network-rules).
 
 ## The session's status bar
