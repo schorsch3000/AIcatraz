@@ -1,6 +1,8 @@
 package jail
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,5 +84,69 @@ func TestCheckHidden(t *testing.T) {
 	write("Dockerfile.az.dockerignore", ".env\nsecrets\n")
 	if err := CheckHidden(b, hidden); err != nil {
 		t.Errorf("both files excluding should pass: %v", err)
+	}
+}
+
+func TestEnsureHiddenIgnored(t *testing.T) {
+	ctx := t.TempDir()
+	b := Build{Dockerfile: filepath.Join(ctx, "Dockerfile.az"), Context: ctx}
+	hidden := []string{filepath.Join(ctx, ".env"), filepath.Join(ctx, "aicatraz.yaml")}
+	ignore := filepath.Join(ctx, ".dockerignore")
+
+	// Without a way to ask, nothing is touched and the build is refused.
+	if err := EnsureHiddenIgnored(b, hidden, nil); err == nil {
+		t.Fatal("must refuse without asking")
+	}
+	if _, err := os.Stat(ignore); err == nil {
+		t.Fatal(".dockerignore created without asking")
+	}
+
+	// Every path is asked about; a no leaves it out, and the refusal stays.
+	var asked []IgnoreGap
+	answers := map[string]bool{".env": true, "aicatraz.yaml": false}
+	ask := func(g IgnoreGap) bool { asked = append(asked, g); return answers[g.Rel] }
+	err := EnsureHiddenIgnored(b, hidden, ask)
+	if err == nil || !strings.Contains(err.Error(), "aicatraz.yaml") {
+		t.Fatalf("a declined path must stay an error, got %v", err)
+	}
+	if len(asked) != 2 || asked[0].Exists || !asked[1].Exists {
+		t.Errorf("asked = %+v (the file is created by the first yes, so the second sees it)", asked)
+	}
+	if got, _ := os.ReadFile(ignore); string(got) != ".env\n" {
+		t.Errorf(".dockerignore = %q", got)
+	}
+
+	// Next time it asks again, and a yes completes the job without touching existing lines.
+	os.WriteFile(ignore, []byte("node_modules"), 0o644) // no trailing newline
+	asked = nil
+	answers[".env"], answers["aicatraz.yaml"] = true, true
+	if err := EnsureHiddenIgnored(b, hidden, ask); err != nil {
+		t.Fatalf("all yes should pass: %v", err)
+	}
+	if got, _ := os.ReadFile(ignore); string(got) != "node_modules\n.env\naicatraz.yaml\n" {
+		t.Errorf(".dockerignore = %q", got)
+	}
+	asked = nil
+	if err := EnsureHiddenIgnored(b, hidden, ask); err != nil || len(asked) != 0 {
+		t.Errorf("nothing left to ask: err=%v asked=%v", err, asked)
+	}
+}
+
+func TestAskIgnoreOnlyAYesCounts(t *testing.T) {
+	for in, want := range map[string]bool{"y\n": true, "YES\n": true, "\n": false, "n\n": false, "yep\n": false, "": false} {
+		var out bytes.Buffer
+		got := askIgnore(strings.NewReader(in), &out)(IgnoreGap{File: "/p/.dockerignore", Rel: ".env"})
+		if got != want {
+			t.Errorf("input %q: got %v", in, got)
+		}
+		if !strings.Contains(out.String(), "Create") {
+			t.Errorf("a missing file should say it is created: %s", out.String())
+		}
+	}
+	// Input after the answer's newline stays unread.
+	r := strings.NewReader("y\nrest")
+	askIgnore(r, io.Discard)(IgnoreGap{File: "/p/.dockerignore", Rel: ".env", Exists: true})
+	if r.Len() != len("rest") {
+		t.Errorf("read past the answer: %d bytes left", r.Len())
 	}
 }

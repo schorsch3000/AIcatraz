@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -91,11 +92,18 @@ func ignoreFilesFor(b Build) []string {
 	return files
 }
 
-// CheckHidden refuses a build when a hidden path inside the build context is
-// not excluded by every applicable ignore file. Otherwise something like
-// `COPY . /app` would bake the hidden file into the image.
-func CheckHidden(b Build, hidden []string) error {
-	var inCtx []string // relative to context
+// IgnoreGap is a hidden path inside the build context that one ignore file
+// does not exclude.
+type IgnoreGap struct {
+	File   string // the ignore file that is missing the path
+	Rel    string // the hidden path, relative to the context, slash-separated
+	Exists bool   // false if File would have to be created
+}
+
+// hiddenInContext returns the hidden paths below the build context, relative
+// to it.
+func hiddenInContext(b Build, hidden []string) []string {
+	var inCtx []string
 	for _, h := range hidden {
 		rel, err := filepath.Rel(b.Context, h)
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -103,32 +111,104 @@ func CheckHidden(b Build, hidden []string) error {
 		}
 		inCtx = append(inCtx, filepath.ToSlash(rel))
 	}
-	if len(inCtx) == 0 {
-		return nil
-	}
+	sort.Strings(inCtx)
+	return inCtx
+}
 
+// IgnoreGaps lists, for every applicable ignore file, the hidden paths it
+// does not exclude. With no ignore file at all, the context's .dockerignore
+// is the one that is missing them.
+func IgnoreGaps(b Build, hidden []string) ([]IgnoreGap, error) {
+	inCtx := hiddenInContext(b, hidden)
+	if len(inCtx) == 0 {
+		return nil, nil
+	}
 	files := ignoreFilesFor(b)
+	var gaps []IgnoreGap
 	if len(files) == 0 {
-		return fmt.Errorf("hidden path %q is inside the build context %s but there is no .dockerignore excluding it; "+
-			"add it to %s so it can't end up in the image",
-			inCtx[0], b.Context, filepath.Join(b.Context, ".dockerignore"))
+		f := filepath.Join(b.Context, ".dockerignore")
+		for _, rel := range inCtx {
+			gaps = append(gaps, IgnoreGap{File: f, Rel: rel})
+		}
+		return gaps, nil
 	}
 	for _, f := range files {
 		fh, err := os.Open(f)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		ig, err := ParseIgnore(fh)
 		fh.Close()
 		if err != nil {
-			return fmt.Errorf("%s: %w", f, err)
+			return nil, fmt.Errorf("%s: %w", f, err)
 		}
 		for _, rel := range inCtx {
 			if !ig.Excluded(rel) {
-				return fmt.Errorf("hidden path %q is inside the build context but %s does not exclude it; "+
-					"add a line for it so it can't end up in the image", rel, f)
+				gaps = append(gaps, IgnoreGap{File: f, Rel: rel, Exists: true})
 			}
 		}
 	}
-	return nil
+	return gaps, nil
+}
+
+// CheckHidden refuses a build when a hidden path inside the build context is
+// not excluded by every applicable ignore file. Otherwise something like
+// `COPY . /app` would bake the hidden file into the image.
+func CheckHidden(b Build, hidden []string) error {
+	gaps, err := IgnoreGaps(b, hidden)
+	if err != nil {
+		return err
+	}
+	if len(gaps) == 0 {
+		return nil
+	}
+	g := gaps[0]
+	if !g.Exists {
+		return fmt.Errorf("hidden path %q is inside the build context %s but there is no .dockerignore excluding it; "+
+			"add it to %s so it can't end up in the image", g.Rel, b.Context, g.File)
+	}
+	return fmt.Errorf("hidden path %q is inside the build context but %s does not exclude it; "+
+		"add a line for it so it can't end up in the image", g.Rel, g.File)
+}
+
+// AppendIgnore adds a line for rel to an ignore file, creating the file if it
+// does not exist.
+func AppendIgnore(file, rel string) error {
+	prefix := ""
+	if data, err := os.ReadFile(file); err == nil && len(data) > 0 && data[len(data)-1] != '\n' {
+		prefix = "\n"
+	}
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(f, prefix+rel+"\n"); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// EnsureHiddenIgnored runs CheckHidden and, when ask is given, offers to fix
+// every gap first: ask is called once per ignore file and path, and only a
+// yes changes the file. Whatever stays unfixed is reported by CheckHidden.
+func EnsureHiddenIgnored(b Build, hidden []string, ask func(IgnoreGap) bool) error {
+	if ask != nil {
+		gaps, err := IgnoreGaps(b, hidden)
+		if err != nil {
+			return err
+		}
+		created := map[string]bool{}
+		for _, g := range gaps {
+			g.Exists = g.Exists || created[g.File]
+			if !ask(g) {
+				continue
+			}
+			if err := AppendIgnore(g.File, g.Rel); err != nil {
+				return err
+			}
+			created[g.File] = true
+		}
+	}
+	return CheckHidden(b, hidden)
 }

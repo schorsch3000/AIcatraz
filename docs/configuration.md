@@ -34,7 +34,7 @@ image:                           # or a build
 
 With neither, `Dockerfile.az` next to the config is built if it exists; otherwise `debian:stable-slim` is used. The image is built on every start (Docker's cache makes that quick) and tagged per project.
 
-The build files (`Dockerfile.az`, the ignore files, and single files named by `COPY`/`ADD`) are pinned: a new or changed one needs your approval before the build. Every hidden path inside the build context must be excluded by `.dockerignore`, otherwise the build is refused, since `COPY . /app` would put it in the image.
+The build files (`Dockerfile.az`, the ignore files, and single files named by `COPY`/`ADD`) are pinned: a new or changed one needs your approval before the build. Every hidden path inside the build context must be excluded by `.dockerignore`, otherwise the build is refused, since `COPY . /app` would put it in the image. In a terminal, `run` and `up` offer to add each missing path to the ignore file (creating `.dockerignore` if there is none): one question per file and path, every time, and only a yes changes anything. Without a terminal, or with `--print`, nothing is asked or written and the build is refused.
 
 The image's `ENTRYPOINT` and `CMD` are replaced. The container runs as your UID and GID whatever the image's `USER` says.
 

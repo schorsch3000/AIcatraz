@@ -91,7 +91,11 @@ func Launch(o Options) (int, error) {
 		for p := range hideIsDir {
 			hidden = append(hidden, p)
 		}
-		if err := CheckHidden(*img.Build, hidden); err != nil {
+		var ask func(IgnoreGap) bool
+		if !o.Print && isTerminal(os.Stdin) && isTerminal(os.Stderr) {
+			ask = askIgnore(os.Stdin, os.Stderr)
+		}
+		if err := EnsureHiddenIgnored(*img.Build, hidden, ask); err != nil {
 			return 0, err
 		}
 	}
