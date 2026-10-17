@@ -15,6 +15,7 @@ import (
 
 	"github.com/schorsch3000/aicatraz/internal/devices"
 	"github.com/schorsch3000/aicatraz/internal/egress"
+	"github.com/schorsch3000/aicatraz/internal/mux"
 	"github.com/schorsch3000/aicatraz/internal/pins"
 )
 
@@ -85,6 +86,7 @@ func (v *validator) validate(c *Config) {
 	v.network(c)
 	v.ports(c)
 	v.devices(c)
+	v.bar(c)
 }
 
 func (v *validator) project(c *Config) {
@@ -538,5 +540,25 @@ func (v *validator) devices(c *Config) {
 			}
 		}
 		c.DeviceSpecs = append(c.DeviceSpecs, spec)
+	}
+}
+
+func (v *validator) bar(c *Config) {
+	b := c.Bar
+	// The same checks that pick the colors at launch, so a mistake shows up here.
+	if b.Theme != "" {
+		if _, err := mux.ResolveColors(b.Theme, "", ""); err != nil {
+			v.errorf([]any{"bar", "theme"}, "%v", err)
+		}
+	}
+	if b.FG != "" {
+		if _, err := mux.ParseColor(b.FG, false); err != nil {
+			v.errorf([]any{"bar", "fg"}, "%v", err)
+		}
+	}
+	if b.BG != "" {
+		if _, err := mux.ParseColor(b.BG, true); err != nil {
+			v.errorf([]any{"bar", "bg"}, "%v", err)
+		}
 	}
 }

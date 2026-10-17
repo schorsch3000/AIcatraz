@@ -84,6 +84,14 @@ network: off
 #     usb_serial: "A5069*"         # ... with this serial number
 #   - path: /dev/ttyUSB0           # a fixed device node
 
+# The look of the status bar of `aicatraz up` sessions, to tell projects apart at a
+# glance (a red bar for the project that deploys). `aicatraz bar-colors` shows the
+# themes. A flag overrides this, and this overrides your AICATRAZ_BAR_* variables.
+# bar:
+#   theme: brick                 # a name from `aicatraz bar-colors`
+#   fg: white                    # text color: a name, 0-255, #rrggbb or default
+#   bg: "#102030"                # background; fg and bg override the theme's
+
 # How long an `ask` prompt waits before it counts as a deny (5s to 1h).
 # approval:
 #   timeout: 2m

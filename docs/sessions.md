@@ -14,7 +14,16 @@ aicatraz up --bar-theme amber --bar-fg '#102030'        # a theme, with another 
 aicatraz up --bar-fg bright-white --bar-bg 24           # your own: a name, 0-255, #rrggbb or default
 ```
 
-Names and the numbers 0 to 15 follow your terminal's color theme; 16 to 255 and `#rrggbb` look the same everywhere. To keep a choice, put it in your shell config: `AICATRAZ_BAR_THEME`, `AICATRAZ_BAR_FG` and `AICATRAZ_BAR_BG`. Colors are personal, so there is no config-file key for them.
+Names and the numbers 0 to 15 follow your terminal's color theme; 16 to 255 and `#rrggbb` look the same everywhere. To keep a choice for yourself, put it in your shell config: `AICATRAZ_BAR_THEME`, `AICATRAZ_BAR_FG` and `AICATRAZ_BAR_BG`. To give one project its own look, so that its terminals are recognisable at a glance (a red bar for the project that deploys), put it in the project's config:
+
+```yaml
+bar:
+  theme: brick          # a name from `aicatraz bar-colors`
+  fg: white             # optional: text color, overrides the theme's
+  bg: "#102030"         # optional: background, overrides the theme's
+```
+
+The theme, the text color and the background are each taken from the first place that sets them: a flag (`--bar-theme`, `--bar-fg`, `--bar-bg`), then the project's `bar` section, then your environment variables, then the default. So a project's look beats your personal default, and a flag beats both. The config is committed with the project, so a team shares it.
 
 ## Detaching, coming back, and a terminal that misbehaves
 

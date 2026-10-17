@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/osrelease"
 )
 
@@ -175,5 +176,37 @@ func TestRunArgsDeviceRules(t *testing.T) {
 	}
 	if args, _ := RunArgs(testInput(t, "volumes:\n  - ~/p:rw\n")); slices.Contains(args, "--device-cgroup-rule") {
 		t.Error("no devices, no rules")
+	}
+}
+
+func TestBarColorsPrecedence(t *testing.T) {
+	cfg := func(yaml string) *config.Config {
+		c, ps := config.Parse([]byte(yaml), config.Options{Home: "/home/u", Dir: "/p"})
+		if config.HasErrors(ps) {
+			t.Fatalf("%+v", ps)
+		}
+		return c
+	}
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	want := func(o Options, c *config.Config, e map[string]string, fg, bg string) {
+		t.Helper()
+		got, err := barColors(o, c, env(e))
+		if err != nil || got.FG != fg || got.BG != bg {
+			t.Errorf("got %+v %v, want fg %q bg %q", got, err, fg, bg)
+		}
+	}
+	none := cfg("volumes: []\n")
+	project := cfg("bar: {theme: brick}\n")
+	partial := cfg("bar: {bg: '#102030'}\n")
+	envs := map[string]string{BarThemeEnv: "plum", BarFGEnv: "yellow"}
+
+	want(Options{}, none, nil, "38;5;231", "48;5;22")                 // the default: forest
+	want(Options{}, none, envs, "33", "48;5;53")                      // the user's environment
+	want(Options{}, project, envs, "33", "48;5;88")                   // the project's theme beats the user's theme; the user's text color is still used
+	want(Options{BarTheme: "amber"}, project, envs, "33", "48;5;214") // a flag beats the project
+	want(Options{BarFG: "red", BarBG: "blue"}, project, envs, "31", "44")
+	want(Options{}, partial, map[string]string{BarThemeEnv: "plum"}, "38;5;231", "48;2;16;32;48") // one color from the project, the rest from the theme
+	if _, err := barColors(Options{BarTheme: "nope"}, none, env(nil)); err == nil {
+		t.Error("an unknown theme is an error")
 	}
 }

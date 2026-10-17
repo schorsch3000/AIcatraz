@@ -30,6 +30,7 @@ type Config struct {
 	Network  *Network  `yaml:"network"`
 	Ports    []string  `yaml:"ports"`
 	Devices  []Device  `yaml:"devices"`
+	Bar      BarStyle  `yaml:"bar"`
 
 	// Sudo gives the user passwordless sudo in the jail (see docs/security.md
 	// for what that costs). Default off.
@@ -367,4 +368,13 @@ type Device struct {
 	USB       string `yaml:"usb"`        // vendor:product in hex, * allowed: 2341:0043, 2e8a:*
 	USBSerial string `yaml:"usb_serial"` // with usb: the device's serial number, * allowed
 	Path      string `yaml:"path"`       // a device node under /dev, * allowed: /dev/ttyUSB*
+}
+
+// BarStyle is the look of the status bar of this project's sessions, for
+// telling projects apart at a glance. A flag overrides it, and it overrides
+// the user's environment variables.
+type BarStyle struct {
+	Theme string `yaml:"theme"` // a name from `aicatraz bar-colors`
+	FG    string `yaml:"fg"`    // text color: a name, 0-255, #rrggbb or default
+	BG    string `yaml:"bg"`    // background color
 }

@@ -576,3 +576,28 @@ devices:
 	check("devices: [{path: /dev/*}]", "every device", Error)
 	check("devices: [{path: '/dev/ttyUSB*'}]", "more than one device", Warning)
 }
+
+func TestBarSection(t *testing.T) {
+	cfg, ps := Parse([]byte("bar: {theme: brick, fg: white, bg: '#102030'}\n"), opts)
+	if len(ps) != 0 || cfg.Bar.Theme != "brick" || cfg.Bar.FG != "white" || cfg.Bar.BG != "#102030" {
+		t.Fatalf("%+v %+v", ps, cfg.Bar)
+	}
+	if _, ps := Parse([]byte("volumes: []\n"), opts); len(ps) != 0 {
+		t.Errorf("no bar section is fine: %+v", ps)
+	}
+	check := func(yaml, want string) {
+		t.Helper()
+		_, ps := Parse([]byte(yaml+"\n"), opts)
+		for _, p := range ps {
+			if p.Severity == Error && strings.Contains(p.Msg, want) {
+				return
+			}
+		}
+		t.Errorf("%s: want an error containing %q, got %+v", yaml, want, ps)
+	}
+	check("bar: {theme: nope}", "bar theme")
+	check("bar: {fg: purple}", "color")
+	check("bar: {bg: 300}", "0 to 255")
+	check("bar: {bg: '#12'}", "color")
+	check("bar: {colour: red}", "not found")
+}

@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/mux"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
@@ -26,11 +27,13 @@ import (
 // those who don't want to pass --detach-key every time.
 const DetachKeyEnv = "AICATRAZ_DETACH_KEY"
 
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
 	}
-	return b
+	return ""
 }
 
 // Environment variables for the status bar.
@@ -98,8 +101,15 @@ func UpMux(o Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	colors, err := mux.ResolveColors(firstNonEmpty(o.BarTheme, os.Getenv(BarThemeEnv)),
-		firstNonEmpty(o.BarFG, os.Getenv(BarFGEnv)), firstNonEmpty(o.BarBG, os.Getenv(BarBGEnv)))
+	cfgAbs, err := filepath.Abs(o.ConfigPath)
+	if err != nil {
+		return 0, err
+	}
+	cfg, id, err := loadForID(cfgAbs)
+	if err != nil {
+		return 0, err
+	}
+	colors, err := barColors(o, cfg, os.Getenv)
 	if err != nil {
 		return 0, err
 	}
@@ -109,14 +119,6 @@ func UpMux(o Options) (int, error) {
 		if key, err = mux.ParseKey(spec); err != nil {
 			return 0, err
 		}
-	}
-	cfgAbs, err := filepath.Abs(o.ConfigPath)
-	if err != nil {
-		return 0, err
-	}
-	cfg, id, err := loadForID(cfgAbs)
-	if err != nil {
-		return 0, err
 	}
 	dir, err := MuxDir(id)
 	if err != nil {
@@ -165,6 +167,16 @@ func UpMux(o Options) (int, error) {
 		return 0, nil
 	}
 	return 0, errors.New(res.Message)
+}
+
+// barColors picks the colors of the status bar. Each of theme, text color and
+// background is taken from the flag if given, else from the project's `bar`
+// section, else from the user's environment, else the default.
+func barColors(o Options, cfg *config.Config, getenv func(string) string) (mux.Colors, error) {
+	return mux.ResolveColors(
+		firstNonEmpty(o.BarTheme, cfg.Bar.Theme, getenv(BarThemeEnv)),
+		firstNonEmpty(o.BarFG, cfg.Bar.FG, getenv(BarFGEnv)),
+		firstNonEmpty(o.BarBG, cfg.Bar.BG, getenv(BarBGEnv)))
 }
 
 // sessionLabel names what the session runs, for the status bar.

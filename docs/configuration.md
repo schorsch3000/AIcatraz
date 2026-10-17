@@ -8,6 +8,7 @@ image:      ...
 volumes:    [ ... ]
 env:        { static: {...}, from_host: [...] }
 sudo:       false
+bar:        { theme: forest, fg: white, bg: "#102030" }
 ports:      [ 3000, "8080:80" ]
 devices:    [ {serial: "usb-Arduino_*"}, {usb: "2e8a:*"}, {path: /dev/ttyUSB0} ]
 network:    off | open | { default: ask, dns: open, resolvers: [...], rules: [ ... ] }
@@ -185,6 +186,17 @@ Gives the jail USB serial adapters, Arduino, ESP and Pico boards: hardware that 
 - **Limits:** a device of another class (`path`) has to be plugged in when the jail starts, since its rule can't be added later. No block devices: the mass-storage drive of a Pico in BOOTSEL mode, or anything that needs to be mounted, doesn't work; neither does anything that needs more than access to the node. For those, run the tool on the host through a rule (for example `picotool load` or a `make flash` that is `allow` or `ask`).
 - **Not allowed:** the nodes that belong to the container (`/dev/null`, `/dev/pts/*`, ...) and `/dev/mem`, `/dev/kmem` and `/dev/port`. Not `path: /dev/*`.
 - Every attach and detach is in the audit log (`"event":"device"`). Nothing is printed while the session runs, because the launcher's output shares the terminal with the program in the jail.
+
+## `bar`
+
+```yaml
+bar:
+  theme: brick          # a name from `aicatraz bar-colors`
+  fg: white             # optional
+  bg: "#102030"         # optional
+```
+
+The look of the status bar of `aicatraz up` sessions in this project, to tell terminals apart at a glance. All three keys are optional. Colors are a name (`red`, `bright-blue`, `gray`), a number from 0 to 255, `#rrggbb`, or `default`. A flag overrides this, and this overrides the user's `AICATRAZ_BAR_*` variables, key by key. See [sessions.md](sessions.md#the-status-bar).
 
 ## `limits`
 
