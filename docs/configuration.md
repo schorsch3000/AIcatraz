@@ -140,8 +140,9 @@ network:
 | `s` | Allow the target on the ports for this session. |
 | `p` | Allow it and remember it (see below). |
 | `x` | Block the target on the ports for this session. |
+| `b` | Block the target on the ports and remember it (see below). |
 | `e` | Edit the ports. They start as the port of the connection and can be a list, a range, a mix, or `*`: `22, 80, 443, 8000-8080`. |
-| `t` | Pick another target for `s`, `p` and `x`: each name the jail looked up, or the address. |
+| `t` | Pick another target for `s`, `p`, `x` and `b`: each name the jail looked up, or the address. |
 | `n`, Enter, Esc | Deny. No answer before the approval timeout is a deny. |
 
 Questions come one at a time; the next one sees the answer to the one before, so a burst of connections to one destination asks once. Without anybody to ask (no `up`, no `--approval-tty`), such connections are refused.

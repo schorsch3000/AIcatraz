@@ -138,12 +138,12 @@ func (p *netPolicy) ask(ctx context.Context, d egress.Dest) bool {
 	p.log(d, map[bool]string{true: "allow", false: "deny"}[reply.Allows()], "asked: "+reply.Verb)
 
 	switch reply.Verb {
-	case approve.VerbSession, approve.VerbRemember, approve.VerbBlock:
+	case approve.VerbSession, approve.VerbRemember, approve.VerbBlock, approve.VerbBlockRemember:
 		rule, err := ruleFromReply(reply)
 		if err != nil {
 			return false
 		}
-		if reply.Verb == approve.VerbRemember {
+		if reply.Verb == approve.VerbRemember || reply.Verb == approve.VerbBlockRemember {
 			if err := p.store.Add(rule); err != nil {
 				fmt.Fprintf(p.stderr, "aicatraz: network: cannot remember the rule: %v\n", err)
 			}
@@ -166,7 +166,7 @@ func ruleFromReply(r approve.Reply) (egress.Rule, error) {
 		return egress.Rule{}, err
 	}
 	dec := egress.Allow
-	if r.Verb == approve.VerbBlock {
+	if r.Verb == approve.VerbBlock || r.Verb == approve.VerbBlockRemember {
 		dec = egress.Deny
 	}
 	return egress.Rule{Target: t, Ports: ports, Protos: []egress.Proto{egress.TCP}, Decision: dec}, nil

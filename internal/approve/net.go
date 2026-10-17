@@ -17,11 +17,12 @@ import (
 
 // Verbs of a network Reply.
 const (
-	VerbOnce     = "once"     // let this connection through, nothing remembered
-	VerbSession  = "session"  // allow the target on the ports until the session ends
-	VerbRemember = "remember" // allow it, and remember it for the project
-	VerbBlock    = "block"    // refuse the target on the ports until the session ends
-	VerbDeny     = "deny"     // refuse this connection
+	VerbOnce          = "once"           // let this connection through, nothing remembered
+	VerbSession       = "session"        // allow the target on the ports until the session ends
+	VerbRemember      = "remember"       // allow it, and remember it for the project
+	VerbBlock         = "block"          // refuse the target on the ports until the session ends
+	VerbBlockRemember = "block-remember" // refuse it, and remember that for the project
+	VerbDeny          = "deny"           // refuse this connection
 )
 
 // Reply is the human's answer to a network request: what to do, and for the
@@ -48,7 +49,7 @@ func ParseReply(s string) Reply {
 	switch r.Verb {
 	case VerbOnce, VerbDeny:
 		return Reply{Verb: r.Verb}
-	case VerbSession, VerbRemember, VerbBlock:
+	case VerbSession, VerbRemember, VerbBlock, VerbBlockRemember:
 		if _, err := egress.ParsePorts(r.Ports); err != nil {
 			return Reply{Verb: VerbDeny}
 		}
@@ -109,6 +110,7 @@ func PromptNet(ctx context.Context, keys KeySource, out io.Writer, req Request, 
 		opt("s", fmt.Sprintf("allow %s on %s for the session", st.Bold(Quote(targets[ti])), st.Bold(ports)))
 		opt("p", fmt.Sprintf("allow %s on %s and remember it", st.Bold(Quote(targets[ti])), st.Bold(ports)))
 		opt("x", fmt.Sprintf("block %s on %s for the session", st.Bold(Quote(targets[ti])), st.Bold(ports)))
+		opt("b", fmt.Sprintf("block %s on %s and remember it", st.Bold(Quote(targets[ti])), st.Bold(ports)))
 		line := "  " + st.BoldGreen("[e]") + " edit the ports"
 		if len(targets) > 1 {
 			line += "   " + st.BoldGreen("[t]") + " other target"
@@ -127,7 +129,7 @@ func PromptNet(ctx context.Context, keys KeySource, out io.Writer, req Request, 
 			write(nl + "  " + st.Yellow("-> cancelled") + nl)
 		case r.Verb == VerbDeny:
 			write(nl + "  " + st.BoldRed("-> denied") + nl)
-		case r.Verb == VerbBlock:
+		case r.Verb == VerbBlock || r.Verb == VerbBlockRemember:
 			write(nl + "  " + st.BoldRed("-> blocked") + nl)
 		default:
 			write(nl + "  " + st.BoldGreen("-> allowed") + nl)
@@ -153,6 +155,8 @@ func PromptNet(ctx context.Context, keys KeySource, out io.Writer, req Request, 
 			return finish(rule(VerbRemember), nil)
 		case 'x', 'X':
 			return finish(rule(VerbBlock), nil)
+		case 'b', 'B':
+			return finish(rule(VerbBlockRemember), nil)
 		case 'n', 'N', '\r', '\n', 27, 3, 4:
 			return finish(Reply{Verb: VerbDeny}, nil)
 		case 't', 'T':

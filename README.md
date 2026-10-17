@@ -99,7 +99,7 @@ aicatraz claude                           # first run installs it; later runs ju
 - **"Connection refused" everywhere.** The jail has no network until the config gives it one. Add `network: open`, or rules.
 - **A hidden file must exist.** Otherwise the agent could create it, and then it would not be hidden any more.
 - **`up` starts below your command and leaves your screen alone.** The bar at the bottom is the status bar; `--status-bar off` removes it, `aicatraz bar-colors` lets you pick a colour.
-- **A prompt appeared out of nowhere.** That is the door doing its job. `y` runs it once, `s` for the session, `p` remembers it, anything else says no.
+- **A prompt appeared out of nowhere.** That is the door doing its job. `y` runs it once, `s` for the session, `p` remembers it, `b` blocks it for good, anything else says no.
 - **The agent says a tool is missing.** The image is yours to fill: `Dockerfile.az` next to the config (`aicatraz init dockerfile` writes a one-line start).
 
 ## Where to read more

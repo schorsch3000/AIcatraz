@@ -129,6 +129,19 @@ func TestPolicyAsksForTheRest(t *testing.T) {
 	}
 }
 
+func TestPolicyRememberedBlockSurvivesASession(t *testing.T) {
+	ap := &fakeNetApprover{replies: []approve.Reply{{Verb: approve.VerbBlockRemember, Ports: "*", Target: "ads.example.net"}}}
+	p, _ := testPolicy(t, netCfg, ap)
+	if p.DecideTCP(context.Background(), dst("203.0.113.5", 443, "ads.example.net")) {
+		t.Fatal("block-remember refuses")
+	}
+	p2, _ := testPolicy(t, netCfg, &fakeNetApprover{})
+	p2.store = p.store
+	if p2.DecideTCP(context.Background(), dst("203.0.113.6", 443, "ads.example.net")) || len(p2.approver.(*fakeNetApprover).reqs) != 0 {
+		t.Error("a remembered block must refuse in the next session without asking")
+	}
+}
+
 func TestPolicyRememberedRulesSurviveASession(t *testing.T) {
 	ap := &fakeNetApprover{replies: []approve.Reply{{Verb: approve.VerbRemember, Ports: "22", Target: "github.com"}}}
 	p, _ := testPolicy(t, netCfg, ap)

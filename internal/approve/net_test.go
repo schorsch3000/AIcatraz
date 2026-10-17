@@ -47,6 +47,7 @@ func TestPromptNetAnswers(t *testing.T) {
 		"s":     {Verb: VerbSession, Ports: "22", Target: "github.com"},
 		"p":     {Verb: VerbRemember, Ports: "22", Target: "github.com"},
 		"x":     {Verb: VerbBlock, Ports: "22", Target: "github.com"},
+		"b":     {Verb: VerbBlockRemember, Ports: "22", Target: "github.com"},
 		"n":     {Verb: VerbDeny},
 		"\r":    {Verb: VerbDeny},
 		"\x1b":  {Verb: VerbDeny},
@@ -81,7 +82,7 @@ func TestPromptNetAnswers(t *testing.T) {
 
 func TestPromptNetShowsWhatIsAsked(t *testing.T) {
 	_, out := promptNet(t, "n", netReq("github.com", "www.github.com"))
-	for _, want := range []string{"140.82.121.4:22", "github.com", "[y]", "[s]", "[p]", "[x]", "[e]", "[t]", "[n] deny", "default: Enter", "OUT OF THE JAIL"} {
+	for _, want := range []string{"140.82.121.4:22", "github.com", "[y]", "[s]", "[p]", "[x]", "[b]", "[e]", "[t]", "[n] deny", "default: Enter", "OUT OF THE JAIL"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, out)
 		}
@@ -110,7 +111,7 @@ func TestPromptNetTimeoutAndCancel(t *testing.T) {
 
 func TestReplyEncoding(t *testing.T) {
 	for _, r := range []Reply{{Verb: VerbOnce}, {Verb: VerbDeny}, {Verb: VerbSession, Ports: "22, 80", Target: "example.com"},
-		{Verb: VerbRemember, Ports: "*", Target: "10.0.0.0/8"}, {Verb: VerbBlock, Ports: "443", Target: "*.evil.org"}} {
+		{Verb: VerbRemember, Ports: "*", Target: "10.0.0.0/8"}, {Verb: VerbBlock, Ports: "443", Target: "*.evil.org"}, {Verb: VerbBlockRemember, Ports: "443", Target: "*.evil.org"}} {
 		if got := ParseReply(r.Encode()); got != r {
 			t.Errorf("%+v became %+v", r, got)
 		}
@@ -122,7 +123,7 @@ func TestReplyEncoding(t *testing.T) {
 			t.Errorf("%q must be a deny, got %+v", bad, got)
 		}
 	}
-	if !(Reply{Verb: VerbOnce}).Allows() || !(Reply{Verb: VerbSession}).Allows() || (Reply{Verb: VerbBlock}).Allows() || (Reply{Verb: VerbDeny}).Allows() {
+	if !(Reply{Verb: VerbOnce}).Allows() || !(Reply{Verb: VerbSession}).Allows() || (Reply{Verb: VerbBlock}).Allows() || (Reply{Verb: VerbBlockRemember}).Allows() || (Reply{Verb: VerbDeny}).Allows() {
 		t.Error("Allows")
 	}
 }
