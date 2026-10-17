@@ -56,7 +56,18 @@ volumes:
 | `ro` | read only |
 | `hi` | hidden: a file reads as empty (`/dev/null` is mounted over it; it can't be deleted or renamed, writes are discarded), a directory is an empty read-only tmpfs |
 
-Rules: every path must exist at launch; `hi` entries must lie inside an `rw` or `ro` entry (nested entries are mounted on top of their parent); no duplicates; no commas in paths; you can't mount `/`, your home directory or a parent of it. Your home path exists in the jail but is an empty directory, so `~` resolves and there is nothing to find.
+**Nesting: the deepest entry wins, and the order in the file does not matter.** Entries are mounted parents first, so a path gets the mode of the most specific entry that contains it. These two lists mean the same:
+
+```yaml
+volumes:                        volumes:
+  - ~/p/sub/deep:hi               - ~/p:rw
+  - ~/p/sub:ro                    - ~/p/sub:ro
+  - ~/p:rw                        - ~/p/sub/deep:hi
+```
+
+This differs on purpose from [rules](#rules), where the first match wins: paths form a tree, so "more specific" is always well defined, while rules overlap in ways that have no natural order. A deeper entry may loosen as well as tighten: `rw` inside `ro` makes that part writable, and an `rw` or `ro` entry inside a hidden directory shows that one path again (hide a directory except one file). Paths are compared as written (after `~` and `./` are resolved), symlinks are not followed, so an entry that reaches a volume through a symlink does not count as nested in it.
+
+Rules: every path must exist at launch; `hi` entries must lie inside an `rw` or `ro` entry; no duplicates; no commas in paths; you can't mount `/`, your home directory or a parent of it. Your home path exists in the jail but is an empty directory, so `~` resolves and there is nothing to find.
 
 ## `env`
 

@@ -164,8 +164,14 @@ func bind(source, target string, readonly bool) string {
 // volumeArgs turns volume entries into mounts, parents before children.
 func volumeArgs(vols []config.Volume, hideIsDir map[string]bool) ([]string, error) {
 	sorted := append([]config.Volume(nil), vols...)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return strings.Count(sorted[i].Path, "/") < strings.Count(sorted[j].Path, "/")
+	// Parents before children, so the deepest entry wins; siblings by path, so
+	// the result doesn't depend on the order in the config.
+	sort.Slice(sorted, func(i, j int) bool {
+		di, dj := strings.Count(sorted[i].Path, "/"), strings.Count(sorted[j].Path, "/")
+		if di != dj {
+			return di < dj
+		}
+		return sorted[i].Path < sorted[j].Path
 	})
 
 	var args []string

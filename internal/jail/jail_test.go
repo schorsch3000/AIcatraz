@@ -105,6 +105,52 @@ volumes:
 	}
 }
 
+// The deepest entry decides, so the order of the volumes in the file is
+// irrelevant: every ordering gives the same mounts.
+func TestVolumeOrderDoesNotMatter(t *testing.T) {
+	entries := []string{
+		"~/p:rw",
+		"~/p/sub:ro",
+		"~/p/sub/deep:rw",
+		"~/p/.env:hi",
+		"~/p/secrets:hi",
+	}
+	mounts := func(order []string) string {
+		yaml := "volumes:\n"
+		for _, e := range order {
+			yaml += "  - " + e + "\n"
+		}
+		in := testInput(t, yaml)
+		in.HideIsDir = map[string]bool{"/home/u/p/.env": false, "/home/u/p/secrets": true}
+		args, err := volumeArgs(in.Cfg.Resolved, in.HideIsDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(args, "\n")
+	}
+	want := mounts(entries)
+	// Every rotation and the reverse of each.
+	for i := range entries {
+		rot := append(slices.Clone(entries[i:]), entries[:i]...)
+		if got := mounts(rot); got != want {
+			t.Errorf("order %v changed the mounts:\n%s\nvs\n%s", rot, got, want)
+		}
+		slices.Reverse(rot)
+		if got := mounts(rot); got != want {
+			t.Errorf("order %v changed the mounts:\n%s\nvs\n%s", rot, got, want)
+		}
+	}
+	// A parent is always mounted before what is nested in it.
+	last := -1
+	for _, target := range []string{"source=/home/u/p,", "source=/home/u/p/sub,", "source=/home/u/p/sub/deep,"} {
+		i := strings.Index(want, target)
+		if i < 0 || i < last {
+			t.Fatalf("%q missing or out of order in:\n%s", target, want)
+		}
+		last = i
+	}
+}
+
 func TestRunArgsEnvNeverLeaksHostValues(t *testing.T) {
 	t.Setenv("MY_TOKEN", "hunter2")
 	in := testInput(t, "env:\n  static: {EDITOR: vim}\n  from_host: [MY_TOKEN]\nlimits: {memory: 2g, pids: 64}\n")
