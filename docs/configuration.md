@@ -261,4 +261,4 @@ The host command runs as you, in the directory the agent was in (which must lie 
 | `version` | `latest` | `latest` (the installed current one) or a pinned version, installed on first use. |
 | `skip_permissions` | `true` | Start the agent in its skip-permissions mode: `--dangerously-skip-permissions` plus `skipDangerousModePermissionPrompt` for Claude Code, `OPENCODE_PERMISSION={"*":"allow"}` for opencode. The jail is the boundary. |
 
-Your agent settings are copied into per-project directories on every launch; the agent's own history stays there between launches. See the README and [idea-v2.md](../idea-v2.md#agent-entrypoints) for exactly what is copied.
+Your agent settings are copied into per-project directories on every launch; the agent's own history stays there between launches. See [agents.md](agents.md) for exactly what is copied.

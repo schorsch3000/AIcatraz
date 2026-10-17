@@ -157,7 +157,8 @@ A project is identified by the real path of its config file; set `project.id` to
 
 - [docs/configuration.md](docs/configuration.md): every config key.
 - [docs/security.md](docs/security.md): threat model, what is enforced, known risks.
-- [idea-v2.md](idea-v2.md): the design in full, with the reasoning.
+- [docs/design.md](docs/design.md): how it works and why: the host door, pins, the protocol, prompts, the audit log.
+- [docs/agents.md](docs/agents.md): the agent entrypoints in detail: installation, config sync, sessions.
 - [milestones.md](milestones.md): how it was built.
 
 ## Hardware: Arduino, ESP, Pico

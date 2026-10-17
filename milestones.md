@@ -1,6 +1,6 @@
 # AIcatraz milestones
 
-Stack: Go, one static binary that dispatches on `argv[0]` (launcher, broker, shim, approval prompt), YAML config, `docker` and `tmux` driven through their CLIs. See `idea-v2.md` for the design.
+Stack: Go, one static binary that dispatches on `argv[0]` (launcher, broker, shim, approval prompt), YAML config, `docker` (and optionally `tmux`) driven through their CLIs. See `docs/design.md` for the design.
 
 Each milestone ends in something usable and has a "done when" list that can be checked by a test, not by feel.
 
