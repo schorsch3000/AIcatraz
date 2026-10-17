@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -81,6 +82,7 @@ func Attach(sock string, in, out *os.File, o AttachOptions) (Result, error) {
 		c.emit(c.tracker.Reset())
 		c.emitString(FinalReset)
 		c.emitString(c.scr.Teardown())
+		c.emitString("\x1b[23;0t") // the title the shell had
 		term.Restore(int(in.Fd()), old)
 	}()
 
@@ -96,6 +98,10 @@ func Attach(sock string, in, out *os.File, o AttachOptions) (Result, error) {
 	// puts it back one row higher.
 	c.emitString("\n\x1b[A")
 	c.emitString(scr.Begin())
+	// The window title is the session's: saved, set, and given back on leaving.
+	// The program's own title commands are dropped, or they would replace it.
+	scr.HideTitles = true
+	c.emitString("\x1b[22;0t\x1b]0;" + title(o.Project) + "\x07")
 	return c.run(winch)
 }
 
@@ -452,3 +458,14 @@ func (c *client) emit(b []byte) {
 }
 
 func (c *client) emitString(s string) { c.emit([]byte(s)) }
+
+// title is the window title of a session: "AIcatraz <project>", with nothing
+// in the project that could end the command early.
+func title(project string) string {
+	return "AIcatraz " + strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == 0x9c {
+			return -1
+		}
+		return r
+	}, project)
+}

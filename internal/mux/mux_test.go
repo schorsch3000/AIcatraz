@@ -466,3 +466,25 @@ func TestDetachKeyInKeyboardProtocols(t *testing.T) {
 		t.Error("ctrl-backslash in the kitty form")
 	}
 }
+
+func TestSessionSetsTheWindowTitle(t *testing.T) {
+	for _, bar := range []Bar{BarBottom, BarOff} {
+		// The program tries to set a title of its own.
+		s := startSession(t, `sleep 0.4; printf '\033]0;program title\007\033]2;another\033\\'; echo ready; sleep 30`)
+		tm := attachWith(t, s, AttachOptions{Detach: DefaultKey, Bar: bar, Project: "my-proj-1a2b"})
+		tm.expect("ready")
+		if scr := tm.screen(); !strings.Contains(scr, "\x1b[22;0t\x1b]0;AIcatraz my-proj-1a2b\x07") {
+			t.Errorf("bar %v: the title must be saved and set: %q", bar, scr)
+		}
+		if scr := tm.screen(); strings.Contains(scr, "program title") || strings.Contains(scr, "another") {
+			t.Errorf("bar %v: the program's title leaked through: %q", bar, scr)
+		}
+		tm.type_(string([]byte{DefaultKey.Byte()}))
+		tm.result()
+		tm.expect("\x1b[23;0t") // the shell's title comes back
+		s.stop()
+	}
+	if got := title("a\x1b]0;x\x07b\u009c"); strings.ContainsAny(got, "\x1b\x07\u009c") || !strings.HasPrefix(got, "AIcatraz a") {
+		t.Errorf("a project name can't end the command: %q", got)
+	}
+}

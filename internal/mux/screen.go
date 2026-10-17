@@ -47,6 +47,10 @@ type Screen struct {
 
 	dirty bool // the bar row may have been damaged: draw it again
 
+	// HideTitles drops the program's window title commands (OSC 0, 1 and 2):
+	// the title belongs to the session.
+	HideTitles bool
+
 	out outParser
 }
 
@@ -138,18 +142,21 @@ const (
 	pEsc
 	pEscInter // ESC followed by intermediate bytes, such as ESC ( B
 	pCSI
-	pString // OSC, DCS, APC, PM, SOS: up to BEL or ST
+	pString // DCS, APC, PM, SOS: up to BEL or ST
 	pStringEsc
+	pOSC // an operating system command, held back whole to see whether it sets the title
+	pOSCEsc
 )
 
 // Out rewrites the program's output for the real terminal.
 func (s *Screen) Out(p []byte) []byte {
-	if !s.Active() {
+	if !s.Active() && !s.HideTitles {
 		return p
 	}
 	o := &s.out
 	res := make([]byte, 0, len(p)+16)
-	for _, c := range p {
+	for i := 0; i < len(p); i++ {
+		c := p[i]
 		switch o.state {
 		case pGround:
 			if c == 0x1b {
@@ -163,7 +170,9 @@ func (s *Screen) Out(p []byte) []byte {
 			switch {
 			case c == '[':
 				o.state = pCSI
-			case c == ']' || c == 'P' || c == '_' || c == '^' || c == 'X':
+			case c == ']':
+				o.state = pOSC
+			case c == 'P' || c == '_' || c == '^' || c == 'X':
 				o.state = pString
 			case c >= 0x20 && c <= 0x2f:
 				o.state = pEscInter
@@ -201,6 +210,43 @@ func (s *Screen) Out(p []byte) []byte {
 				o.state = pGround
 			}
 
+		case pOSC:
+			o.buf = append(o.buf, c)
+			switch {
+			case c == 0x07:
+				res = append(res, s.finishOSC(o.buf)...)
+				o.state = pGround
+			case c == 0x1b:
+				o.state = pOSCEsc
+			case len(o.buf) > 4096: // not a title: let the rest of it stream through
+				res = append(res, o.buf...)
+				o.buf = o.buf[:0]
+				o.state = pString
+			}
+
+		case pOSCEsc:
+			o.buf = append(o.buf, c)
+			switch {
+			case c == '\\':
+				res = append(res, s.finishOSC(o.buf)...)
+				o.state = pGround
+			case c == 0x1b: // still waiting for the backslash
+			case c == 0x07:
+				res = append(res, s.finishOSC(o.buf)...)
+				o.state = pGround
+			default:
+				// An escape that is no string terminator ends the command and starts
+				// a new sequence. What was cut off is dropped if it was a title, or
+				// the terminal would wait for an end that never comes.
+				cut := o.buf[:len(o.buf)-2]
+				if !s.isTitle(cut) {
+					res = append(res, cut...)
+				}
+				o.buf = append(o.buf[:0], 0x1b)
+				o.state = pEsc
+				i-- // the byte after the escape is read again, as the start of that sequence
+			}
+
 		case pString:
 			res = append(res, o.buf...) // the introducer, once
 			o.buf = o.buf[:0]
@@ -224,11 +270,27 @@ func (s *Screen) Out(p []byte) []byte {
 	return res
 }
 
+// finishOSC decides what becomes of a complete operating system command: a
+// window title is dropped when titles are hidden, anything else goes through.
+func (s *Screen) finishOSC(seq []byte) []byte {
+	if s.isTitle(seq) {
+		return nil
+	}
+	return seq
+}
+
+// isTitle reports whether seq (ESC ] ...) sets the window or icon title, and
+// titles are hidden.
+func (s *Screen) isTitle(seq []byte) bool {
+	return s.HideTitles && len(seq) >= 4 && seq[0] == 0x1b && seq[1] == ']' &&
+		(seq[2] == '0' || seq[2] == '1' || seq[2] == '2') && seq[3] == ';'
+}
+
 // FlushOut returns what the parser is holding back, unchanged, for when the
 // program has gone quiet in the middle of a sequence.
 func (s *Screen) FlushOut() []byte {
 	o := &s.out
-	if len(o.buf) == 0 || o.state == pGround || o.state == pString || o.state == pStringEsc {
+	if len(o.buf) == 0 || o.state == pGround || o.state == pString || o.state == pStringEsc || o.state == pOSC || o.state == pOSCEsc {
 		return nil
 	}
 	b := append([]byte(nil), o.buf...)
@@ -250,6 +312,9 @@ func params(b []byte) []int {
 }
 
 func (s *Screen) csiOut(param []byte, final byte, whole []byte) []byte {
+	if !s.Active() {
+		return whole
+	}
 	private := len(param) > 0 && (param[0] == '?' || param[0] == '>' || param[0] == '<' || param[0] == '=')
 	inter := len(param) > 0 && param[len(param)-1] >= 0x20 && param[len(param)-1] <= 0x2f
 

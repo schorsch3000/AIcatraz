@@ -300,3 +300,50 @@ func TestPreviewShowsEveryTheme(t *testing.T) {
 		t.Errorf("preview: %s", b.String())
 	}
 }
+
+func TestScreenHidesTheProgramsWindowTitle(t *testing.T) {
+	for _, bar := range []Bar{BarBottom, BarOff} {
+		s := NewScreen(bar, 30, 100)
+		s.HideTitles = true
+		for in, want := range map[string]string{
+			"a\x1b]0;my title\x07b":                   "ab",
+			"a\x1b]2;my title\x1b\\b":                 "ab",
+			"a\x1b]1;icon\x07b":                       "ab",
+			"\x1b]0;\x1b]0;x\x07":                     "",                                     // an aborted title goes with the one that follows
+			"\x1b]0;cut\x1b]8;;u\x07t\x1b]8;;\x07":    "\x1b]8;;u\x07t\x1b]8;;\x07",           // an aborted title, then a hyperlink: the link stays
+			"\x1b]8;;http://x\x07link\x1b]8;;\x07":    "\x1b]8;;http://x\x07link\x1b]8;;\x07", // hyperlinks stay
+			"\x1b]52;c;aGk=\x07":                      "\x1b]52;c;aGk=\x07",
+			"\x1b]66;w=1;x\x1b\\":                     "\x1b]66;w=1;x\x1b\\",
+			"\x1b]4;1;?\x07\x1b]10;?\x07\x1b]112\x07": "\x1b]4;1;?\x07\x1b]10;?\x07\x1b]112\x07",
+			"\x1b]20;title-like\x07":                  "\x1b]20;title-like\x07", // only 0, 1 and 2
+			"x\x1b[31my":                              "x\x1b[31my",
+		} {
+			if got := out(s, in); got != want {
+				t.Errorf("bar %v: %q: got %q, want %q", bar, in, got, want)
+			}
+		}
+		// Split across reads.
+		if got := out(s, "a\x1b", "]", "0;ti", "tle", "\x07", "b"); got != "ab" {
+			t.Errorf("split: %q", got)
+		}
+		// A very long command that is not a title streams through unchanged.
+		long := "\x1b]52;c;" + strings.Repeat("A", 10000) + "\x07"
+		if got := out(s, long); got != long {
+			t.Errorf("a long command must pass intact (%d bytes in, %d out)", len(long), len(got))
+		}
+	}
+	// Left alone unless asked.
+	s := NewScreen(BarBottom, 30, 100)
+	if got := out(s, "\x1b]0;t\x07"); got != "\x1b]0;t\x07" {
+		t.Errorf("titles are only hidden on request: %q", got)
+	}
+	if got := out(NewScreen(BarOff, 30, 100), "\x1b]0;t\x07\x1b[r"); got != "\x1b]0;t\x07\x1b[r" {
+		t.Errorf("with no bar and no request nothing changes: %q", got)
+	}
+	// Without a bar, scroll regions are not rewritten even while titles are hidden.
+	off := NewScreen(BarOff, 30, 100)
+	off.HideTitles = true
+	if got := out(off, "\x1b[3;40r\x1b[2J"); got != "\x1b[3;40r\x1b[2J" {
+		t.Errorf("no bar, no rewriting: %q", got)
+	}
+}
