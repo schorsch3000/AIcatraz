@@ -2,258 +2,123 @@
 
 A jail for AI coding agents on a Linux machine.
 
-The agent gets a Docker container with full freedom inside it. It can read and write the project you mount and nothing else: no home directory, no SSH keys, no other projects. When it needs something that must happen on your machine (a deploy, `git push`, a script that uses a secret), it asks through a narrow door, and **you** decide what that door lets through.
+Coding agents are useful, fast, and happy to run whatever seems like a good idea at 3 a.m. Giving one your whole home directory, your SSH keys and your network is a plan with a very short post-mortem. AIcatraz puts the agent in a Docker container instead: it can read and write the project you mount and nothing else, it has no network unless you say so, and when it genuinely needs something from your machine (a deploy, a `git push`, a script that uses a secret) it has to ask through a narrow door that **you** control.
 
 ```
- your machine                              container (the jail)
+ your machine                              the jail (a container)
  ┌──────────────────────────┐              ┌────────────────────────────┐
  │ ~/git/project   ─────────┼── rw mount ──┤ ~/git/project              │
- │ ~/git/project/.env       │   hidden     │ .env  (reads as empty)     │
- │ ~/.ssh, ~/other, ...     │   invisible  │ ~     (empty)              │
+ │ ~/git/project/.env       │   hidden     │ .env   (reads as empty)    │
+ │ ~/.ssh, ~/other, ...     │   invisible  │ ~      (empty)             │
  │                          │              │                            │
  │  broker  ◄───────────────┼── socket ────┤ `make deploy` ─► shim      │
- │  policy · approval · log │              │ agent: claude / opencode   │
+ │  policy · prompts · log  │              │ the agent                  │
  └──────────────────────────┘              └────────────────────────────┘
 ```
 
-What it does:
+It contains the *scope*, not the secrets inside it: an agent you let reach the network can still send out what you mounted. [docs/security.md](docs/security.md) says plainly what is and isn't covered.
 
-- **Scope containment.** Only the volumes you list exist in the jail, as read-write, read-only, or hidden. A hidden file reads as empty, even though host commands can still use it.
-- **A policy for the host.** Commands the agent may run on your machine are listed in the config, with exact arguments. Each is `allow`, `ask` (you get a prompt), `local` (runs inside the jail) or `deny`. Everything else is refused.
-- **Pinned scripts.** An allowed `make deploy` really means "run whatever the Makefile says", and the agent can edit the Makefile. So the files a rule depends on are pinned: if one changes, the call asks you again and shows the diff.
-- **Coding agents out of the box.** `aicatraz claude` and `aicatraz opencode` install the agent, copy your settings in, start it without its own permission prompts (the jail is the boundary), and remember the session so `aicatraz resume` can continue it.
-- **An audit log** of every request, decision and exit.
+## What you get
 
-The jail has **no network** unless the config gives it one (`network: open`, or rules that limit it). What it deliberately does **not** do: stop an agent you let connect from sending out what you mounted. It contains the scope, not the secrets inside the scope. See [docs/security.md](docs/security.md) for the threat model and the known risks.
+- **Mounts with three modes.** `rw`, `ro`, or `hi` (hidden: the file reads as empty, though host commands can still use it). Your real home is never mounted; the jail's `~` is an empty directory.
+- **A door to the host.** The commands the agent may run *on your machine* are listed in the config, with exact arguments. Each is `allow`, `ask` (you get a prompt), `local` (runs inside the jail) or `deny`. Anything not listed is refused.
+- **Pinned scripts.** `make deploy` means "do whatever the Makefile says", and the agent can edit the Makefile. So the files a rule depends on are pinned: if one changes, the call asks again and shows the diff.
+- **No network by default.** `network: open` for the normal one, or rules that allow named hosts, IPs and ports and ask about the rest. [Details](docs/configuration.md#network).
+- **Agents out of the box.** `aicatraz claude` and `aicatraz opencode` install the agent, copy your settings in, and remember sessions for `aicatraz resume`. [Details](docs/agents.md).
+- **Sessions you can walk away from.** `aicatraz up` keeps the jail running when you detach (`Ctrl-Y`), shows approval prompts over the agent's screen, and has a status bar.
+- **The odds and ends.** Published ports (reach a dev server from your browser), USB devices that survive being unplugged (Arduino, ESP, Pico), `sudo` inside the jail if you must, and an audit log of every request.
 
 ## Requirements
 
-- Linux (other systems are out of scope) and Docker (tested with 26.1).
-- Go 1.24 or newer, to build.
-- Nothing else: `aicatraz up` has its own terminal multiplexer. `tmux` is only needed for `up --tmux`.
-- For the agents: a Debian- or Ubuntu-based image. Both agents are dynamically linked against glibc and don't run on Alpine.
+Linux, and Docker (tested with 26.1). Go 1.24 to build it. `tmux` only if you want `up --tmux`. The agents need a Debian or Ubuntu based image, because they are built against glibc.
 
 ## Install
 
 ```bash
 git clone <this repository> aicatraz && cd aicatraz
-make build                                   # creates bin/aicatraz
-install -m 0755 bin/aicatraz ~/.local/bin/   # or anywhere on your PATH
-ln -s aicatraz ~/.local/bin/az               # optional short alias: `az` works like `aicatraz`
-aicatraz version
+make build                                      # bin/aicatraz, one static binary
+install -m 0755 bin/aicatraz ~/.local/bin/      # or anywhere on your PATH
+ln -s aicatraz ~/.local/bin/az                  # optional: `az` is a short alias
+source <(aicatraz completion bash)              # also: zsh, fish
 ```
 
-`make build` produces a static binary. The same binary is mounted into every jail as the shim, so there is nothing else to install in your images.
-
-Release binaries (`make release`) for linux/amd64 and linux/arm64 come with a `SHA256SUMS` file, and are reproducible: see [Releases](#releases).
-
-## Quick start
-
-In the project you want to put in a jail:
+## Five minutes
 
 ```bash
 cd ~/git/myproject
-aicatraz init              # writes aicatraz.yaml (use --list to see other starters)
-aicatraz config check      # validates it and warns about risky rules
-aicatraz run               # an interactive shell in the jail
+aicatraz init                # writes aicatraz.yaml; `init --list` shows other starters
+aicatraz config check        # checks it and warns about things that look unwise
+aicatraz run                 # a shell in the jail
 ```
 
-Inside the jail:
+You are now in a Debian container as yourself, with the project at the same path as on your machine and nothing else. Try `ls ~`: it is empty, which is the point.
 
-```
-$ whoami; echo $HOME; ls -A ~
-you
-/home/you
-(nothing: your home exists, and is empty)
-$ ls ~/git/myproject
-...                        # the project is here, writable
-```
-
-Hide a secret, so the agent sees an empty file:
+Then add a rule so the agent can do one useful thing on your machine, and see what happens when it asks:
 
 ```yaml
+# aicatraz.yaml
 volumes:
-  - .:rw                         # relative to this file, so it works for the whole team
-  - ./.env:hi                    # must exist
-```
+  - .:rw                                  # the directory of this file
+  - ./aicatraz.yaml:hi                    # the agent can't read or edit its own rules
+  - ./.env:hi                             # a secret it must not see
 
-Let the agent deploy through you, with a brake:
+network: open                             # off by default
 
-```yaml
 rules:
   - command: make
-    args: [deploy-test]
-    decision: allow
-    depends_on: auto             # pin the Makefile: a change asks you first
+    args: [build, test]
+    decision: local                       # runs inside the jail
   - command: make
-    args: [deploy-prod]
-    decision: ask
+    args: [deploy]
+    decision: ask                         # runs on your machine, after you say yes
+    depends_on: auto                      # ...and asks again, with a diff, if the Makefile changed
 ```
 
-Run a coding agent:
+Start an agent in it:
 
 ```bash
-aicatraz init --example claude --force   # config + Dockerfile.az with node and git
-aicatraz claude                          # first run: installs Claude Code, builds the image
-aicatraz sessions                        # later: list sessions...
-aicatraz resume                          # ...and continue the last one
+aicatraz init --example claude --force    # a config and a Dockerfile.az for Claude Code
+aicatraz claude                           # first run installs it; later runs just start it
 ```
 
-In a terminal, `aicatraz claude` (and `opencode`, `agent`, `resume`) runs the agent as an `aicatraz up` session: prompts for `ask` rules are drawn over the agent's screen and you answer them there, you can detach with Ctrl-Y and come back with `aicatraz up`, and the status bar shows. `--no-session` runs it directly in the terminal instead. Or give a terminal of your own: `--approval-tty /dev/pts/N`. Without either, `ask` rules are denied, and the denial says why.
+## The commands you will use
 
-## Commands
-
-| Command | What it does |
+| | |
 |---|---|
-| `aicatraz init [--example name] [--list] [--force]` | Write a starter `aicatraz.yaml` (and `Dockerfile.az`) into this directory. Never overwrites without `--force`. |
-| `aicatraz init dockerfile [--force]` | Write a one-line `Dockerfile.az` (`FROM debian:13`, `FROM ubuntu:24.04`, ...) matching the distribution this machine runs. Knows Debian, Ubuntu, Fedora, Alpine, Rocky, AlmaLinux, CentOS Stream, RHEL, Arch, openSUSE, Amazon Linux and their Ubuntu and Debian derivatives. Never overwrites without `--force`. |
-| `aicatraz completion bash\|zsh\|fish` | Print shell completion code for `aicatraz` and `az`; see [Shell completion](#shell-completion). |
-| `aicatraz config check [file]` | Validate a config; warn about rules that are valid but risky. |
-| `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |
-| `aicatraz up [flags] [-- command...]` | Same, as a session that keeps running when you detach (`Ctrl-Y`, or `--detach-key ctrl-<key>` / `$AICATRAZ_DETACH_KEY`), and that shows approval prompts over the agent's screen. Attaches if it already runs. A status bar on the bottom row shows the project, what runs, how long, and the detach key (`--status-bar off`, colors: `--bar-theme`, `--bar-fg`, `--bar-bg`). `--tmux` uses a tmux session instead. |
-| `aicatraz down` | Stop the project's session (the jail shuts down). |
-| `aicatraz devices [-c file]` | List the USB devices of this machine (vendor:product, serial number, device nodes) and which of them the config hands to the jail. |
-| `aicatraz network [-c file] list` | Show the network rules of the config and the ones remembered from prompts. |
-| `aicatraz network [-c file] allow\|deny <target> [--ports ...]` · `forget <number> \| --all` | Change the remembered network rules (also in a running session). |
-| `aicatraz pins [-c file] list` | Show the files whose approved version is remembered, and whether each is still as approved (`ok`, `changed`, `missing`). |
-| `aicatraz pins [-c file] diff [<path>...]` | Show what changed in pinned files since they were approved (all changed ones, or the files you name). |
-| `aicatraz pins [-c file] forget <path>... \| --missing \| --all` | Forget pins: the next time a rule runs them they need approval again. `--missing` drops pins of files that are gone. |
-| `aicatraz bar-colors` | Show the status bar in every color theme. |
-| `aicatraz shell [-- command...]` | Another shell in the running jail (a second terminal). Host commands use the same broker. |
-| `aicatraz claude` / `opencode` `[flags] [-- agent args...]` | Start that agent in the jail. Installed on first use. In a terminal it runs as an `up` session (same flags; `--no-session` to run it directly). |
-| `aicatraz agent` | Start the agent named by `agent.tool` in the config. |
-| `aicatraz sessions` | List the agent sessions of this project. |
-| `aicatraz resume [id] [--pick]` | Continue the latest (or a given) agent session. |
-| `aicatraz tools [list \| install <tool> [version] [--from-host] \| update [tool]]` | Manage the cached agent executables. |
-| `aicatraz version` | Print the version. |
+| `aicatraz run [-- cmd]` | The jail in this terminal. |
+| `aicatraz up` | The jail as a session you can detach from (`Ctrl-Y`) and come back to with `up`. `down` stops it. |
+| `aicatraz claude`, `opencode`, `resume` | Agents. In a terminal they run as an `up` session. |
+| `aicatraz config check` | Validate the config and lint it. |
+| `aicatraz shell` | Another shell in the running jail. |
+| `aicatraz devices`, `network`, `pins`, `sessions`, `tools` | Look at, and change, the things their names suggest. |
 
-Flags for `run`, `up` and the agent commands: `-c file` (config, default `aicatraz.yaml`), `--print` (show the `docker` commands and change nothing), `--approval-tty /dev/pts/N`, `--approve-build` (pin a changed `Dockerfile.az` without asking).
+`aicatraz` with no arguments prints all of them; [docs/commands.md](docs/commands.md) lists every command and flag, where the files live, and what the common error messages mean.
 
-Output is colored on a terminal. `NO_COLOR` turns it off; `AICATRAZ_COLOR=always|never` overrides the detection.
+## Things that surprise people
 
-## How the host door works
+- **"Connection refused" everywhere.** The jail has no network until the config gives it one. Add `network: open`, or rules.
+- **A hidden file must exist.** Otherwise the agent could create it, and then it would not be hidden any more.
+- **`up` starts below your command and leaves your screen alone.** The bar at the bottom is the status bar; `--status-bar off` removes it, `aicatraz bar-colors` lets you pick a colour.
+- **A prompt appeared out of nowhere.** That is the door doing its job. `y` runs it once, `s` for the session, `p` remembers it, anything else says no.
+- **The agent says a tool is missing.** The image is yours to fill: `Dockerfile.az` next to the config (`aicatraz init dockerfile` writes a one-line start).
 
-Inside the jail, the commands named in your rules are shims (symlinks to the `aicatraz` binary, first on `PATH`). When the agent runs `make deploy-test`:
+## Where to read more
 
-1. the shim sends the call (name, arguments, directory, input) to the **broker**, a process on your machine, over a unix socket;
-2. the broker matches it against the rules, first match wins, default deny. Arguments are matched token by token, so `make -f /tmp/evil.mk deploy-test` is not `make deploy-test`;
-3. `allow`: it runs on the host, with an environment built from scratch (only what the rule passes on), and its output and exit code come back. `ask`: you are asked first, and shown the exact command, directory, binary and any changed files. `local`: the shim runs the jail's own copy. `deny`: refused;
-4. everything is written to `~/.local/state/aicatraz/<project>/audit.log`.
-
-The shim is a convenience, never a boundary: the broker validates and decides everything itself.
-
-## Files and directories
-
-| Where | What |
+| | |
 |---|---|
-| `aicatraz.yaml`, `Dockerfile.az` | Your config and the image the jail runs in (in the project). Optional `Dockerfile.az`; without it a plain Debian is used. |
-| `~/.local/state/aicatraz/<project>/` | Per-project state: audit log, pins, session index, the agents' config and history. Outside every mount. |
-| `~/.local/share/aicatraz/tools/` | Cached agent executables. |
-| `$XDG_RUNTIME_DIR/aicatraz/<pid>/` | The broker's socket for a running session. |
-
-A project is identified by the real path of its config file; set `project.id` to pin the id if you move it.
-
-## Documentation
-
-- [docs/configuration.md](docs/configuration.md): every config key.
-- [docs/security.md](docs/security.md): threat model, what is enforced, known risks.
-- [docs/design.md](docs/design.md): how it works and why: the host door, pins, the protocol, prompts, the audit log.
-- [docs/agents.md](docs/agents.md): the agent entrypoints in detail: installation, config sync, sessions.
-- [milestones.md](milestones.md): how it was built.
-
-## Hardware: Arduino, ESP, Pico
-
-`devices:` hands USB serial adapters and boards to the jail, by stable name (`/dev/serial/by-id/...`), by vendor:product with an optional serial number, or by path. They appear in the jail when they are plugged in and disappear when they are unplugged, and come back after a reset or re-plug, whatever number the kernel gives them. `aicatraz devices` shows what is plugged in and the names to write.
-
-```yaml
-devices:
-  - serial: "usb-Arduino_*"
-  - usb: "1a86:7523"      # a CH340 adapter
-```
-
-The jail gets the device nodes only; things that need more, such as flashing a Pico in BOOTSEL mode (a mass-storage drive), run on the host through a rule. See [the reference](docs/configuration.md#devices) and [the risks](docs/security.md#devices).
-
-## Limiting the network
-
-By default the jail has no network at all: with no `network` section, or with `network: off`, it only has a loopback. `network: open` gives it Docker's normal network, unchecked (an agent needs that or rules, to reach its service). A `network` section with rules limits it instead, for every protocol: an allowlist of host names (with `*.domain`), IP addresses and CIDR ranges, with ports as a list, a range or `*`. Whatever no rule covers is asked about, the way `ask` rules are: in the `aicatraz up` overlay you can allow it once, for the session, or for good, and change the ports before you do (`22, 80, 443, 8000-8080`).
-
-```yaml
-network:
-  default: ask
-  rules:
-    - {to: api.anthropic.com, ports: 443, decision: allow}
-    - {to: "*.github.com", ports: [22, 443], decision: allow}
-    - {to: 10.20.0.0/16, ports: "5432, 5433", decision: allow}
-```
-
-`ports:` goes the other way: it publishes ports of the jail on this machine (127.0.0.1 unless you say otherwise), to reach a server inside it from your browser. It needs a network too.
-
-It runs a small helper container that owns the jail's network (built once, from Debian; needs network access that one time). See [the reference](docs/configuration.md#network) and [what it does and does not stop](docs/security.md#network-rules).
-
-## The session's status bar
-
-`aicatraz up` keeps the bottom row of your terminal for a status bar: the project on the left, what runs and for how long in the middle (if there is room), and the detach key on the right. The program inside is told the terminal has one row less, and a scroll region keeps its output above the bar. It is a thin layer, not a terminal emulator; it is tested with vim and a shell. `--status-bar off` (or `AICATRAZ_STATUS_BAR=off`) turns it off, and is the first thing to try if something draws wrongly.
-
-The bar is white on dark green (`forest`) by default. `aicatraz bar-colors` shows it in 18 ready-made themes (with their contrast, so you can see which are easy to read). Choose one, or set the colors yourself:
-
-```bash
-aicatraz up --bar-theme charcoal
-aicatraz up --bar-theme amber --bar-fg '#102030'        # a theme, with another text color
-aicatraz up --bar-fg bright-white --bar-bg 24           # your own: a name, 0-255, #rrggbb or default
-```
-
-Names and the numbers 0 to 15 follow your terminal's color theme; 16 to 255 and `#rrggbb` look the same everywhere. To keep a choice, put it in your shell config: `AICATRAZ_BAR_THEME`, `AICATRAZ_BAR_FG` and `AICATRAZ_BAR_BG`. Colors are personal, so there is no config-file key for them.
-
-### Detaching, coming back, and a terminal that misbehaves
-
-`Ctrl-Y` (or your `--detach-key`) leaves the session running. In the same project, `aicatraz up` attaches to it again, and so does `aicatraz claude` or `opencode` (their arguments are ignored while a session runs); `aicatraz down` stops it. There is one session per project. The session starts below the command that started it and leaves your screen as it was, so when it ends, or you detach, you are where you were. While you are attached, the window title is `AIcatraz <project>` (saved first, and given back when you leave); a title the program inside sets is ignored, or it would replace it. When you leave, the terminal is put back into plain modes: mouse reports, bracketed paste, keyboard protocols, cursor shape and so on are switched off, whatever the program turned on.
-
-If a program still draws wrongly, or leaves the terminal in an odd state, `AICATRAZ_TERMLOG=/tmp/term.log aicatraz up ...` records everything sent to the terminal (`>`) and typed into it (`<`), with times, one quoted line each. It contains everything that was shown and typed, secrets included; share it with care. `reset` (the command) repairs a terminal by hand.
-
-## Troubleshooting
-
-| You see | Because | Do |
-|---|---|---|
-| `volume ...: ... does not exist` | A hidden path must exist at launch (otherwise the agent could create it). | Create the file or directory. |
-| The agent can't reach its service, `connection refused` everywhere | The jail has no network unless the config gives it one. | Add `network: open`, or rules (see [Limiting the network](#limiting-the-network)). |
-| `no approval terminal: ask rules will be denied` | Nobody can be asked. | Start with `aicatraz up`, or pass `--approval-tty`. |
-| `build files changed since they were last approved` | `Dockerfile.az` is new or changed, and there is no terminal to ask. | Run `aicatraz run` interactively once and answer `p`, or pass `--approve-build`. |
-| `the image ... has no glibc dynamic loader` | The agents don't run on Alpine. | Use a Debian/Ubuntu-based image. |
-| `hidden path ... is no longer hidden`, session stopped | An editor saved a hidden *file* by renaming a new one over it. | Edit in place, or hide a directory (`.secrets/`). |
-| `node: not found` from a hook at agent start | A hook in your own agent settings needs a tool the image lacks. | Install it in `Dockerfile.az`. |
-| Docker permission denied | Your user can't reach the Docker socket. | Add yourself to the `docker` group. |
+| [docs/configuration.md](docs/configuration.md) | Every config key, with defaults and examples. |
+| [docs/commands.md](docs/commands.md) | Every command and flag, the files and directories, shell completion, troubleshooting. |
+| [docs/sessions.md](docs/sessions.md) | `up`: detaching, the status bar and its colors, the window title, a misbehaving terminal. |
+| [docs/security.md](docs/security.md) | The threat model, what is enforced, what is not, and the known risks. |
+| [docs/agents.md](docs/agents.md) | Claude Code and opencode: installation, config sync, sessions. |
+| [docs/design.md](docs/design.md) | How it works and why: the door, pins, prompts, the audit log. |
+| [docs/development.md](docs/development.md) | Building, testing, the code layout, reproducible releases. |
+| [milestones.md](milestones.md) | How it was built, and how each part was tested. |
 
 ## Development
 
-```bash
-make test                # unit tests
-make test-integration    # real containers: needs docker and network access
-go test -race ./...      # a couple of minutes: the stress tests are heavy
-```
-
-Layout: `cmd/aicatraz` (the one binary: launcher, broker, shim and CLI, chosen by the name it is started under), `internal/config` (schema and linter), `internal/jail` (container, volumes, build, sessions), `internal/mux` (the built-in terminal multiplexer), `internal/broker` and `internal/shim` with `internal/proto` (the host door), `internal/policy`, `internal/pins`, `internal/approve`, `internal/canary`, `internal/agent`, `internal/examples`, `internal/ui`.
-
-## Shell completion
-
-`aicatraz completion <shell>` prints code to source. It completes commands, flags, example names, agent names and files, for both `aicatraz` and `az`.
-
-```bash
-source <(aicatraz completion bash)       # bash (add to ~/.bashrc); `sh` prints the same bash code
-source <(aicatraz completion zsh)        # zsh (add to ~/.zshrc, after compinit)
-aicatraz completion fish | source        # fish (or save to ~/.config/fish/completions/aicatraz.fish)
-```
-
-## Releases
-
-```bash
-make release          # dist/aicatraz-<version>-linux-{amd64,arm64} and dist/SHA256SUMS
-make release-check    # builds twice, in different directories, and compares the hashes
-```
-
-Builds use `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false` and no build id, so the same source and the same Go toolchain give byte-identical binaries. To verify a release: check out the tag, run `make release` with the Go version shown by `aicatraz version`, and compare `dist/SHA256SUMS`. `make release` refuses to run on a tree with uncommitted changes.
-
-Pushing a tag such as `v0.1.0` runs `.github/workflows/release.yml`: it vets and tests, checks that the build is reproducible, builds both binaries and publishes them, with `SHA256SUMS`, as a GitHub release.
+`make test` runs the unit tests, `make test-integration` starts real containers. Building, the code layout and how releases are made reproducible are in [docs/development.md](docs/development.md).
 
 ## License
 
-AIcatraz is free software under the GNU General Public License, version 3. See [LICENSE](LICENSE). Every Go source file starts with `SPDX-License-Identifier: GPL-3.0-only`; a test keeps it that way.
+GPL-3.0-only. See [LICENSE](LICENSE). Every Go file carries the SPDX line, and a test keeps it that way.

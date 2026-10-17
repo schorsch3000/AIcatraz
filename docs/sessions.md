@@ -1,0 +1,23 @@
+# Sessions, the status bar and the terminal
+
+`aicatraz up` (and the agent commands, in a terminal) run the jail as a **session**: a small server keeps the program in the jail alive when you detach, and a client attaches to it. This page is about that: detaching, the status bar and its colors, the window title, and what to do when a terminal misbehaves. How it is built is in [design.md](design.md#approval-prompts) and [milestones.md](../milestones.md).
+
+## The status bar
+
+`aicatraz up` keeps the bottom row of your terminal for a status bar: the project on the left, what runs and for how long in the middle (if there is room), and the detach key on the right. The program inside is told the terminal has one row less, and a scroll region keeps its output above the bar. It is a thin layer, not a terminal emulator; it is tested with vim and a shell. `--status-bar off` (or `AICATRAZ_STATUS_BAR=off`) turns it off, and is the first thing to try if something draws wrongly.
+
+The bar is white on dark green (`forest`) by default. `aicatraz bar-colors` shows it in 18 ready-made themes (with their contrast, so you can see which are easy to read). Choose one, or set the colors yourself:
+
+```bash
+aicatraz up --bar-theme charcoal
+aicatraz up --bar-theme amber --bar-fg '#102030'        # a theme, with another text color
+aicatraz up --bar-fg bright-white --bar-bg 24           # your own: a name, 0-255, #rrggbb or default
+```
+
+Names and the numbers 0 to 15 follow your terminal's color theme; 16 to 255 and `#rrggbb` look the same everywhere. To keep a choice, put it in your shell config: `AICATRAZ_BAR_THEME`, `AICATRAZ_BAR_FG` and `AICATRAZ_BAR_BG`. Colors are personal, so there is no config-file key for them.
+
+## Detaching, coming back, and a terminal that misbehaves
+
+`Ctrl-Y` (or your `--detach-key`) leaves the session running. In the same project, `aicatraz up` attaches to it again, and so does `aicatraz claude` or `opencode` (their arguments are ignored while a session runs); `aicatraz down` stops it. There is one session per project. The session starts below the command that started it and leaves your screen as it was, so when it ends, or you detach, you are where you were. While you are attached, the window title is `AIcatraz <project>` (saved first, and given back when you leave); a title the program inside sets is ignored, or it would replace it. When you leave, the terminal is put back into plain modes: mouse reports, bracketed paste, keyboard protocols, cursor shape and so on are switched off, whatever the program turned on.
+
+If a program still draws wrongly, or leaves the terminal in an odd state, `AICATRAZ_TERMLOG=/tmp/term.log aicatraz up ...` records everything sent to the terminal (`>`) and typed into it (`<`), with times, one quoted line each. It contains everything that was shown and typed, secrets included; share it with care. `reset` (the command) repairs a terminal by hand.
