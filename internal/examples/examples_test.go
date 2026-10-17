@@ -1,6 +1,7 @@
 package examples
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -68,6 +69,51 @@ func TestCheckProjectDir(t *testing.T) {
 	for _, bad := range []string{"/home/u", "/home", "/"} {
 		if err := CheckProjectDir(bad, "/home/u"); err == nil {
 			t.Errorf("%s must be refused", bad)
+		}
+	}
+}
+
+// The starter config documents every option in comments. Uncommented, those
+// examples must be valid and free of linter warnings, so they can't rot.
+func TestStarterCommentedOptionsAreValid(t *testing.T) {
+	files, err := Render("starter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := regexp.MustCompile(`^# (project|image|env|limits|approval|canary|global|rules|agent):`)
+	// The image has two alternative forms: check each on its own.
+	for _, drop := range []func(string) bool{
+		func(l string) bool { return strings.HasPrefix(l, "image: debian") },
+		func(l string) bool {
+			return strings.HasPrefix(l, "image:  ") || strings.HasPrefix(l, "  dockerfile") || strings.HasPrefix(l, "  context")
+		},
+	} {
+		var out []string
+		on := false
+		for _, l := range strings.Split(files[ConfigFile], "\n") {
+			switch {
+			case keys.MatchString(l):
+				on = true
+			case strings.TrimSpace(l) == "":
+				on = false
+			}
+			if on {
+				l = strings.TrimPrefix(strings.TrimPrefix(l, "#"), " ")
+				if drop(l) {
+					continue
+				}
+			}
+			out = append(out, l)
+		}
+		text := strings.Join(out, "\n")
+		for _, key := range []string{"project:", "env:", "limits:", "approval:", "canary:", "global:", "rules:", "agent:"} {
+			if !strings.Contains("\n"+text, "\n"+key) {
+				t.Errorf("option %s is not documented in the starter config", key)
+			}
+		}
+		cfg, ps := config.Parse([]byte(text), config.Options{Home: "/home/u", Dir: "/srv/p"})
+		if cfg == nil || len(ps) != 0 {
+			t.Errorf("uncommented starter has problems: %+v\n%s", ps, text)
 		}
 	}
 }
