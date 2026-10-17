@@ -163,6 +163,7 @@ func (p *Profile) Command(home string, o LaunchOptions) (argv []string, env map[
 	case "claude":
 		env["CLAUDE_CONFIG_DIR"] = path.Join(home, ".claude")
 		env["DISABLE_AUTOUPDATER"] = "1"
+		env["COLORTERM"] = "truecolor" // Claude Code suggests it; only TERM is passed into the jail
 		if o.SkipPermissions {
 			// The flag alone still shows a confirmation dialog on every start. It is
 			// skipped when skipDangerousModePermissionPrompt is set in any settings

@@ -25,6 +25,7 @@ agent:
 | opencode | `opencode.json(c)`, `AGENTS.md`, `agents/`, `commands/`, `plugins/`, `skills/`, `tool/`, `themes/`; `auth.json`, `mcp-auth.json`; `kv.json` (seeded) | the database, snapshots, logs, `node_modules` |
 
 - Claude Code is told where to look with `CLAUDE_CONFIG_DIR`, which also keeps `~/.claude.json` inside the mounted directory (a single file can't be bind-mounted safely because the agent rewrites it by renaming).
+- Claude Code gets `COLORTERM=truecolor`, so it draws in full color (the jail only passes `TERM` on from the host).
 - opencode's database can be many gigabytes (11 GB on the machine this was built on), so it is never copied: the jail starts with an empty one per project.
 - Symlinks in your config are followed (a symlinked skills directory is copied as what it points to) and nothing in the copy is a symlink. A single entry may copy at most 256 MB.
 - Credentials are copied like any other synced file, so everything in the jail can read them. Settings that call host paths or commands (hooks, MCP servers) run inside the container or fail there.

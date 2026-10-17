@@ -43,7 +43,7 @@ func TestClaudeCommand(t *testing.T) {
 	if !slices.Equal(argv, want) {
 		t.Errorf("argv %v", argv)
 	}
-	if env["CLAUDE_CONFIG_DIR"] != "/home/u/.claude" || env["DISABLE_AUTOUPDATER"] != "1" {
+	if env["CLAUDE_CONFIG_DIR"] != "/home/u/.claude" || env["DISABLE_AUTOUPDATER"] != "1" || env["COLORTERM"] != "truecolor" {
 		t.Errorf("env %v", env)
 	}
 	argv, _ = p.Command("/home/u", LaunchOptions{Resume: "r-1", SessionID: "ignored"})
