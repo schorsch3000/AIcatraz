@@ -206,7 +206,7 @@ The look of the status bar of `aicatraz up` sessions in this project, to tell te
 | `pids` | `1024` | Maximum number of processes in the jail. |
 | `memory` | none | Memory limit, e.g. `512m` or `2g`. |
 
-The jail always drops all capabilities, sets `no-new-privileges`, and has a read-only root filesystem with tmpfs for `/tmp`, `/var/tmp`, `/run` and your (empty) home.
+The jail always drops all capabilities, sets `no-new-privileges`, and has a read-only root filesystem. `/tmp`, `/var/tmp` and your (empty) home are docker volumes created for the session and removed when it ends, so they use disk, not RAM; there is no size limit beyond the free space of the Docker data directory. `/run` is a small tmpfs.
 
 ## `approval`
 

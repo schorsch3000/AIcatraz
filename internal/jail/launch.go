@@ -188,6 +188,7 @@ func Launch(o Options) (int, error) {
 			fmt.Fprintf(o.Stdout, "# network rules: the sidecar below owns the jail's network; every connection is checked against the rules\n")
 			fmt.Fprintln(o.Stdout, shellLine("docker", egressRunArgs(in.NetworkContainer, id, os.Getpid(), self, "<run dir>/egress.sock", "<run dir>/egress.nft", cfg.Network.Resolvers, cfg.PortMaps)))
 		}
+		fmt.Fprintf(o.Stdout, "# scratch volumes for /tmp, /var/tmp and the home directory are created first (docker volume create %s-{tmp,vartmp,home}) and removed afterwards\n", in.Name)
 		fmt.Fprintln(o.Stdout, shellLine("docker", runArgs))
 		return 0, nil
 	}
@@ -230,6 +231,12 @@ func Launch(o Options) (int, error) {
 	// The image is local now (built or pulled), so its PATH can be read.
 	in.ImagePath = imagePath("docker", img.Ref)
 	if runArgs, err = RunArgs(in); err != nil {
+		return 0, err
+	}
+
+	in.ScratchPrefix = in.Name // later runs with the same mounts (agent session lookup) share the volumes
+	defer removeScratch(in)
+	if err := createScratch(in, o.Stderr); err != nil {
 		return 0, err
 	}
 
@@ -481,4 +488,35 @@ func chooseApprover(cfg *config.Config, o Options, runDir string) approve.Approv
 	}
 	say("no approval terminal: `ask` rules will be denied (start with `aicatraz up`, or pass --approval-tty)")
 	return nil
+}
+
+// createScratch creates the session's scratch volumes and hands them to the
+// user: docker makes a new volume's mount point root-owned unless the image
+// already has the directory.
+func createScratch(in RunInput, stderr io.Writer) error {
+	script := ""
+	args := []string{"run", "--rm", "--user", "0:0", "--cap-drop=ALL", "--cap-add=CHOWN", "--cap-add=FOWNER",
+		"--network", "none", "--entrypoint", "sh"}
+	for i, sc := range ScratchDirs {
+		vol := in.ScratchVolume(sc)
+		if out, err := exec.Command("docker", "volume", "create", "--label", "aicatraz.project="+in.ID, vol).CombinedOutput(); err != nil {
+			return fmt.Errorf("docker volume create: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		mnt := fmt.Sprintf("/s%d", i)
+		args = append(args, "--mount", "type=volume,src="+vol+",dst="+mnt)
+		script += fmt.Sprintf("chown %d:%d %s && chmod %s %s && ", in.UID, in.GID, mnt, sc.Mode, mnt)
+	}
+	args = append(args, in.Image, "-c", script+"true")
+	cmd := exec.Command("docker", args...)
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("preparing scratch volumes: %w", err)
+	}
+	return nil
+}
+
+func removeScratch(in RunInput) {
+	for _, sc := range ScratchDirs {
+		exec.Command("docker", "volume", "rm", "-f", in.ScratchVolume(sc)).Run()
+	}
 }

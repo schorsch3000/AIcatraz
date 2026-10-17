@@ -67,15 +67,16 @@ func TestRunArgsHardening(t *testing.T) {
 	if slices.Contains(args, "--privileged") {
 		t.Error("must never be privileged")
 	}
-	// The home directory is an owned, empty tmpfs.
-	found := false
-	for i, a := range args {
-		if a == "--tmpfs" && strings.HasPrefix(args[i+1], "/home/u:") {
-			found = strings.Contains(args[i+1], "uid=1000") && strings.Contains(args[i+1], "gid=1001")
+	// /tmp, /var/tmp and home are volumes, not RAM.
+	for _, dst := range []string{"/tmp", "/var/tmp", "/home/u"} {
+		if !slices.Contains(args, "type=volume,src=aicatraz-proj-1-9-"+map[string]string{"/tmp": "tmp", "/var/tmp": "vartmp", "/home/u": "home"}[dst]+",dst="+dst) {
+			t.Errorf("no scratch volume for %s in\n%s", dst, strings.Join(args, " "))
 		}
 	}
-	if !found {
-		t.Error("home tmpfs missing or not owned by the user")
+	for i, a := range args {
+		if a == "--tmpfs" && !strings.HasPrefix(args[i+1], "/run:") && !strings.Contains(args[i+1], "size=4k") && !strings.Contains(args[i+1], "ro,") {
+			t.Errorf("unexpected RAM-backed mount %s", args[i+1])
+		}
 	}
 }
 

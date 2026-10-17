@@ -52,6 +52,32 @@ type RunInput struct {
 	NetworkContainer string
 	// DeviceRules are the device-cgroup rules for the hardware the config names.
 	DeviceRules []string
+	// ScratchPrefix names the session's scratch volumes ("" means Name).
+	ScratchPrefix string
+}
+
+// Scratch is one writable, disk-backed directory of the jail.
+type Scratch struct {
+	Suffix string // volume name suffix
+	Path   func(in RunInput) string
+	Mode   string // for chmod
+}
+
+// ScratchDirs are /tmp, /var/tmp and the home directory. They are docker
+// volumes, not tmpfs, so they don't take RAM.
+var ScratchDirs = []Scratch{
+	{"tmp", func(RunInput) string { return "/tmp" }, "1777"},
+	{"vartmp", func(RunInput) string { return "/var/tmp" }, "1777"},
+	{"home", func(in RunInput) string { return in.Home }, "0700"},
+}
+
+// ScratchVolume is the name of the volume behind one scratch directory.
+func (in RunInput) ScratchVolume(sc Scratch) string {
+	p := in.ScratchPrefix
+	if p == "" {
+		p = in.Name
+	}
+	return p + "-" + sc.Suffix
 }
 
 func PasswdPath(stateDir string) string { return filepath.Join(stateDir, "passwd") }
@@ -105,16 +131,13 @@ func RunArgs(in RunInput) ([]string, error) {
 		args = append(args, "--memory", cfg.Limits.Memory)
 	}
 
-	// Writable scratch space; the root filesystem is read-only. tmpfs defaults
-	// to noexec, which breaks anything that builds and runs from /tmp.
-	scratch := "rw,exec,nosuid,nodev,size=256m"
-	args = append(args,
-		"--tmpfs", "/tmp:"+scratch+",mode=1777",
-		"--tmpfs", "/var/tmp:"+scratch+",mode=1777",
-		"--tmpfs", "/run:rw,nosuid,nodev,size=16m,mode=1777",
-		// The real home path exists but is empty: no dotfiles, keys or history.
-		"--tmpfs", fmt.Sprintf("%s:%s,mode=0700,uid=%d,gid=%d", in.Home, scratch, in.UID, in.GID),
-	)
+	// Writable scratch space; the root filesystem is read-only. The volumes
+	// are created (and made writable for the user) before the jail starts and
+	// removed when it ends. A volume, unlike a tmpfs, is not mounted noexec.
+	for _, sc := range ScratchDirs {
+		args = append(args, "--mount", "type=volume,src="+in.ScratchVolume(sc)+",dst="+sc.Path(in))
+	}
+	args = append(args, "--tmpfs", "/run:rw,nosuid,nodev,size=16m,mode=1777")
 
 	env := []string{
 		"HOME=" + in.Home,
