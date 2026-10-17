@@ -488,3 +488,19 @@ func TestSessionSetsTheWindowTitle(t *testing.T) {
 		t.Errorf("a project name can't end the command: %q", got)
 	}
 }
+
+func TestInfoKeyShowsTheSettingsAndDoesNotReachTheProgram(t *testing.T) {
+	s := startSession(t, `read a; echo "got:$a"; exit 0`)
+	tm := attachWith(t, s, AttachOptions{Detach: DefaultKey, Info: InfoKey, Bar: BarBottom, Project: "proj", ThemeName: "brick",
+		Settings: [][2]string{{"bar theme", "brick"}}})
+	tm.expect("Ctrl-Q info")
+	tm.type_(string([]byte{InfoKey.Byte()}))
+	tm.expect("AIcatraz session")
+	tm.expect("brick")
+	time.Sleep(300 * time.Millisecond) // the popup ignores keys for a moment
+	tm.type_("x")                      // closes it, and is not typed into the program
+	tm.expect("\x1b[?1049l")
+	tm.type_("y\r")
+	tm.expect("got:y")
+	tm.result()
+}

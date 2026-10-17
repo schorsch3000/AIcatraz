@@ -190,7 +190,7 @@ func TestBarColorsPrecedence(t *testing.T) {
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 	want := func(o Options, c *config.Config, e map[string]string, fg, bg string) {
 		t.Helper()
-		got, err := barColors(o, c, env(e))
+		got, _, err := barColors(o, c, env(e))
 		if err != nil || got.FG != fg || got.BG != bg {
 			t.Errorf("got %+v %v, want fg %q bg %q", got, err, fg, bg)
 		}
@@ -206,7 +206,7 @@ func TestBarColorsPrecedence(t *testing.T) {
 	want(Options{BarTheme: "amber"}, project, envs, "33", "48;5;214") // a flag beats the project
 	want(Options{BarFG: "red", BarBG: "blue"}, project, envs, "31", "44")
 	want(Options{}, partial, map[string]string{BarThemeEnv: "plum"}, "38;5;231", "48;2;16;32;48") // one color from the project, the rest from the theme
-	if _, err := barColors(Options{BarTheme: "nope"}, none, env(nil)); err == nil {
+	if _, _, err := barColors(Options{BarTheme: "nope"}, none, env(nil)); err == nil {
 		t.Error("an unknown theme is an error")
 	}
 }

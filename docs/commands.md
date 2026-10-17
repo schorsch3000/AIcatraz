@@ -11,7 +11,7 @@ The README has the short version. This is the full list.
 | `aicatraz completion bash\|zsh\|fish` | Print shell completion code for `aicatraz` and `az`; see [Shell completion](#shell-completion). |
 | `aicatraz config check [file]` | Validate a config; warn about rules that are valid but risky. |
 | `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |
-| `aicatraz up [flags] [-- command...]` | Same, as a session that keeps running when you detach (`Ctrl-Y`, or `--detach-key ctrl-<key>` / `$AICATRAZ_DETACH_KEY`), and that shows approval prompts over the agent's screen. Attaches if it already runs. A status bar on the bottom row shows the project, what runs, how long, and the detach key (`--status-bar off`, colors: `--bar-theme`, `--bar-fg`, `--bar-bg`). `--tmux` uses a tmux session instead. |
+| `aicatraz up [flags] [-- command...]` | Same, as a session that keeps running when you detach (`Ctrl-Y`, or `--detach-key ctrl-<key>` / `$AICATRAZ_DETACH_KEY`), and that shows approval prompts over the agent's screen. Attaches if it already runs. A status bar on the bottom row shows the project, what runs, how long, and the detach key (`Ctrl-Q` shows the session's settings: `--info-key`, `$AICATRAZ_INFO_KEY`; `--status-bar off`, colors: `--bar-theme`, `--bar-fg`, `--bar-bg`). `--tmux` uses a tmux session instead. |
 | `aicatraz down` | Stop the project's session (the jail shuts down). |
 | `aicatraz devices [-c file]` | List the USB devices of this machine (vendor:product, serial number, device nodes) and which of them the config hands to the jail. |
 | `aicatraz network [-c file] list` | Show the network rules of the config and the ones remembered from prompts. |

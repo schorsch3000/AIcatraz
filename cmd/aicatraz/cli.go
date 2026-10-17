@@ -29,12 +29,13 @@ import (
 const defaultConfig = "aicatraz.yaml"
 
 const usage = `usage:
-  aicatraz up [-c file] [--print] [--tmux] [--detach-key key] [--approve-build] [-- command...]
+  aicatraz up [-c file] [--print] [--tmux] [--detach-key key] [--info-key key] [--approve-build] [-- command...]
               [--status-bar bottom|off] [--bar-theme name] [--bar-fg color] [--bar-bg color]
                                  start the jail as a session that keeps running when you
                                  detach (Ctrl-Y; or --detach-key ctrl-<key>, or
-                                 $AICATRAZ_DETACH_KEY), with a status bar on the bottom
-                                 row (colors: see bar-colors); approval prompts for 'ask'
+                                 $AICATRAZ_DETACH_KEY; Ctrl-Q shows the session's settings, or
+                                 --info-key ctrl-<key|off>, $AICATRAZ_INFO_KEY), with a
+                                 status bar on the bottom row (colors: see bar-colors); approval prompts for 'ask'
                                  rules appear over the screen; attaches if it already runs
   aicatraz down [-c file]        stop the session of this project
   aicatraz bar-colors            show the status bar in every color theme
@@ -231,6 +232,9 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 			args = args[2:]
 		case a == "--detach-key" && len(args) >= 2 && sessionVerb:
 			opts.DetachKey = args[1]
+			args = args[2:]
+		case a == "--info-key" && len(args) >= 2 && sessionVerb:
+			opts.InfoKey = args[1]
 			args = args[2:]
 		case a == "--bar-theme" && len(args) >= 2 && sessionVerb:
 			opts.BarTheme = args[1]

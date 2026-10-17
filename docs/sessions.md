@@ -23,6 +23,8 @@ bar:
   bg: "#102030"         # optional: background, overrides the theme's
 ```
 
+`Ctrl-Q` shows a popup with the session's settings: project, program, uptime, the theme the bar uses (for `random`, the one that was drawn, with a swatch), its colors and the config file. Any key closes it; the program inside does not see the keys and its output is held back meanwhile. Change the key with `--info-key ctrl-<key>` or `$AICATRAZ_INFO_KEY`, or turn the popup off with `--info-key off`. If it is the same key as the detach key, detaching wins and the popup is off.
+
 The theme, the text color and the background are each taken from the first place that sets them: a flag (`--bar-theme`, `--bar-fg`, `--bar-bg`), then the project's `bar` section, then your environment variables, then the default. So a project's look beats your personal default, and a flag beats both. The config is committed with the project, so a team shares it.
 
 ## Detaching, coming back, and a terminal that misbehaves

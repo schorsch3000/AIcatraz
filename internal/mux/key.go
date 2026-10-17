@@ -25,6 +25,10 @@ type Key struct {
 // something you would miss: it is readline's "yank".
 var DefaultKey = mustKey("ctrl-y")
 
+// InfoKey shows the session's settings. Ctrl-Q is a plain Ctrl+letter on
+// every layout, and the coding agents leave it alone.
+var InfoKey = mustKey("ctrl-q")
+
 func mustKey(spec string) Key {
 	k, err := ParseKey(spec)
 	if err != nil {

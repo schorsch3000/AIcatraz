@@ -14,6 +14,7 @@ type BarInfo struct {
 	Project string    // left
 	Label   string    // the program, centered together with the uptime
 	Key     string    // the detach key, right
+	InfoKey string    // the key that shows the session's settings; empty: not offered
 	Started time.Time // when the session began
 	Colors  Colors    // zero means DefaultColors
 }
@@ -69,12 +70,18 @@ func (b BarInfo) Render(width int, now time.Time) string {
 		return ""
 	}
 	right := " " + clean(b.Key) + " detach "
+	if b.InfoKey != "" {
+		right = " " + clean(b.InfoKey) + " info ·" + right
+	}
 	left := " AIcatraz: "
 	if width < utf8.RuneCountInString(left)+2 { // hardly any room: the name, cut off
 		s := fit(left, width)
 		return b.style() + s + strings.Repeat(" ", width-utf8.RuneCountInString(s)) + "\x1b[0m"
 	}
 	project := clean(b.Project)
+	if b.InfoKey != "" && utf8.RuneCountInString(left)+utf8.RuneCountInString(project)+1+utf8.RuneCountInString(right) > width {
+		right = " " + clean(b.Key) + " detach " // the detach hint matters more than the info hint
+	}
 	if utf8.RuneCountInString(left)+utf8.RuneCountInString(project)+1+utf8.RuneCountInString(right) > width {
 		room := width - utf8.RuneCountInString(left) - 1 - utf8.RuneCountInString(right)
 		if room < 3 { // too narrow for the key hint

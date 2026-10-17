@@ -40,6 +40,7 @@ var (
 	flagPick      = cflag{"", "pick", "", "choose a session from a list"}
 	flagFromHst   = cflag{"", "from-host", "", "copy the agent from this machine"}
 	flagDetach    = cflag{"", "detach-key", "value", "key that detaches, such as ctrl-y"}
+	flagInfo      = cflag{"", "info-key", "value", "key that shows the session's settings, such as ctrl-q, or off"}
 	flagBar       = cflag{"", "status-bar", "bar", "bottom or off"}
 	flagTheme     = cflag{"", "bar-theme", "theme", "color theme of the status bar"}
 	flagBarFG     = cflag{"", "bar-fg", "value", "text color of the status bar"}
@@ -50,10 +51,10 @@ var (
 
 // agentFlags are the flags of the verbs that start an agent: they run as a
 // session, so they take the session's flags.
-var agentFlags = []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagNoSession, flagDetach, flagBar, flagTheme, flagBarFG, flagBarBG}
+var agentFlags = []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagNoSession, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG}
 
 var completionVerbs = []cverb{
-	{name: "up", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagAgent, flagResume}},
+	{name: "up", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagAgent, flagResume}},
 	{name: "bar-colors", desc: "show the status bar in every color theme"},
 	{name: "down", desc: "stop the session of this project", flags: []cflag{flagConfig}},
 	{name: "run", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagAgent, flagResume}},
@@ -176,7 +177,7 @@ func bashCompletion() string {
 	w("    --bar-theme)\n")
 	w("        COMPREPLY=($(compgen -W %q -- \"$cur\"))\n", strings.Join(themeNames(), " "))
 	w("        return ;;\n")
-	w("    --resume | --detach-key | --bar-fg | --bar-bg | --ports)\n")
+	w("    --resume | --detach-key | --info-key | --bar-fg | --bar-bg | --ports)\n")
 	w("        return ;;\n")
 	w("    esac\n")
 	w("    if [[ $cur == -* ]]; then\n")
@@ -193,7 +194,7 @@ func bashCompletion() string {
 	w("    for ((i = 2; i < COMP_CWORD; i++)); do\n")
 	w("        word=${COMP_WORDS[i]}\n")
 	w("        case \"$word\" in\n")
-	w("        -c | --config | --approval-tty | --agent | --resume | --status-bar | --bar-theme | --bar-fg | --bar-bg | --detach-key | --ports | -e | --example) ((i++)) ;;\n")
+	w("        -c | --config | --approval-tty | --agent | --resume | --status-bar | --bar-theme | --bar-fg | --bar-bg | --detach-key | --info-key | --ports | -e | --example) ((i++)) ;;\n")
 	w("        -*) ;;\n")
 	w("        *) ((npos++)) ;;\n")
 	w("        esac\n")

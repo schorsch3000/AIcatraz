@@ -37,6 +37,7 @@ type Options struct {
 	ApprovalTTY  string   // prompt for `ask` rules on this terminal device instead of tmux
 	ApprovalSock string   // prompt for `ask` rules through this session socket (set by `up`)
 	Tmux         bool     // `up` uses tmux instead of the built-in multiplexer
+	InfoKey      string   // the key that shows the session's settings, such as "ctrl-q"; "off" for none
 	DetachKey    string   // the key that detaches from an `up` session, such as "ctrl-y"
 	StatusBar    string   // `up`'s status bar: bottom (default) or off
 	BarTheme     string   // color theme of the bar

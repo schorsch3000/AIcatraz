@@ -27,6 +27,10 @@ import (
 // those who don't want to pass --detach-key every time.
 const DetachKeyEnv = "AICATRAZ_DETACH_KEY"
 
+// InfoKeyEnv names the environment variable that sets the key that shows the
+// session's settings ("off" for none).
+const InfoKeyEnv = "AICATRAZ_INFO_KEY"
+
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if v != "" {
@@ -109,7 +113,7 @@ func UpMux(o Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	colors, err := barColors(o, cfg, os.Getenv)
+	colors, theme, err := barColors(o, cfg, os.Getenv)
 	if err != nil {
 		return 0, err
 	}
@@ -154,8 +158,26 @@ func UpMux(o Options) (int, error) {
 		return 0, err
 	}
 
+	info := mux.InfoKey
+	if spec := firstNonEmpty(o.InfoKey, os.Getenv(InfoKeyEnv)); strings.EqualFold(strings.TrimSpace(spec), "off") {
+		info = mux.Key{}
+	} else if spec != "" {
+		var err error
+		if info, err = mux.ParseKey(spec); err != nil {
+			return 0, fmt.Errorf("info key: %w", err)
+		}
+	}
+	if info.Name == key.Name {
+		info = mux.Key{} // the detach key wins
+	}
+	settings := [][2]string{
+		{"bar theme", theme},
+		{"bar text", colors.FG},
+		{"bar background", colors.BG},
+		{"config", cfgAbs},
+	}
 	ui.Note(o.Stderr, "detach with %s (the session keeps running), stop it with `%s down`", key.Name, ui.Prog)
-	res, err := mux.Attach(filepath.Join(dir, mux.AttachSock), os.Stdin, os.Stdout, mux.AttachOptions{Detach: key, Bar: bar, Project: id, Colors: colors, LogPath: os.Getenv(TermLogEnv)})
+	res, err := mux.Attach(filepath.Join(dir, mux.AttachSock), os.Stdin, os.Stdout, mux.AttachOptions{Detach: key, Bar: bar, Project: id, Colors: colors, Info: info, ThemeName: theme, Settings: settings, LogPath: os.Getenv(TermLogEnv)})
 	if err != nil {
 		return 0, err
 	}
@@ -172,8 +194,8 @@ func UpMux(o Options) (int, error) {
 // barColors picks the colors of the status bar. Each of theme, text color and
 // background is taken from the flag if given, else from the project's `bar`
 // section, else from the user's environment, else the default.
-func barColors(o Options, cfg *config.Config, getenv func(string) string) (mux.Colors, error) {
-	return mux.ResolveColors(
+func barColors(o Options, cfg *config.Config, getenv func(string) string) (mux.Colors, string, error) {
+	return mux.ResolveTheme(
 		firstNonEmpty(o.BarTheme, cfg.Bar.Theme, getenv(BarThemeEnv)),
 		firstNonEmpty(o.BarFG, cfg.Bar.FG, getenv(BarFGEnv)),
 		firstNonEmpty(o.BarBG, cfg.Bar.BG, getenv(BarBGEnv)))

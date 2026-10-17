@@ -132,6 +132,13 @@ var randomIndex = rand.IntN
 // the others, picked now) with an optional text color and background color,
 // which override the theme's.
 func ResolveColors(theme, fg, bg string) (Colors, error) {
+	c, _, err := ResolveTheme(theme, fg, bg)
+	return c, err
+}
+
+// ResolveTheme is ResolveColors that also says which theme it used: for
+// "random", the one that was drawn.
+func ResolveTheme(theme, fg, bg string) (Colors, string, error) {
 	name := strings.ToLower(strings.TrimSpace(theme))
 	if name == "" {
 		name = DefaultTheme
@@ -151,7 +158,7 @@ func ResolveColors(theme, fg, bg string) (Colors, error) {
 		for _, c := range Themes {
 			names = append(names, c.Name)
 		}
-		return Colors{}, fmt.Errorf("bar theme %q: use one of %s (`aicatraz bar-colors` shows them)", theme, strings.Join(names, ", "))
+		return Colors{}, "", fmt.Errorf("bar theme %q: use one of %s (`aicatraz bar-colors` shows them)", theme, strings.Join(names, ", "))
 	}
 	if fg == "" {
 		fg = t.FG
@@ -161,13 +168,13 @@ func ResolveColors(theme, fg, bg string) (Colors, error) {
 	}
 	f, err := ParseColor(fg, false)
 	if err != nil {
-		return Colors{}, err
+		return Colors{}, "", err
 	}
 	b, err := ParseColor(bg, true)
 	if err != nil {
-		return Colors{}, err
+		return Colors{}, "", err
 	}
-	return Colors{FG: f, BG: b}, nil
+	return Colors{FG: f, BG: b}, name, nil
 }
 
 // palette256 returns the RGB of a color of the xterm 256-color palette.

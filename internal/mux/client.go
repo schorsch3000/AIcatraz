@@ -40,11 +40,14 @@ type Result struct {
 
 // Options for Attach.
 type AttachOptions struct {
-	Detach  Key
-	Bar     Bar    // whether there is a status bar
-	Project string // shown on the bar
-	Colors  Colors // of the bar; zero means DefaultColors
-	LogPath string // if set, a record of what is sent to the terminal and what is typed
+	Detach    Key
+	Info      Key         // shows Settings in a popup; zero: no popup
+	Settings  [][2]string // what the popup lists: name and value
+	ThemeName string      // the bar's theme, for the swatch in the popup
+	Bar       Bar         // whether there is a status bar
+	Project   string      // shown on the bar
+	Colors    Colors      // of the bar; zero means DefaultColors
+	LogPath   string      // if set, a record of what is sent to the terminal and what is typed
 }
 
 // Attach connects the terminal in/out to the session at sock until the
@@ -76,7 +79,8 @@ func Attach(sock string, in, out *os.File, o AttachOptions) (Result, error) {
 		defer tlog.Close()
 	}
 	c := &client{conn: conn, in: in, out: out, detach: o.Detach, scr: scr, log: tlog,
-		bar: BarInfo{Project: o.Project, Key: o.Detach.Name, Started: time.Now(), Colors: o.Colors}}
+		info: o.Info, settings: o.Settings, theme: o.ThemeName,
+		bar: BarInfo{Project: o.Project, Key: o.Detach.Name, InfoKey: o.Info.Name, Started: time.Now(), Colors: o.Colors}}
 	defer func() {
 		c.emit(c.leaveOverlayBytes())
 		c.emit(c.tracker.Reset())
@@ -119,10 +123,13 @@ type client struct {
 	out  *os.File
 	wmu  sync.Mutex
 
-	log    *termLog // a record of what was shown and typed, if asked for
-	detach Key
-	scr    *Screen // keeps a row for the status bar
-	bar    BarInfo
+	log      *termLog // a record of what was shown and typed, if asked for
+	detach   Key
+	info     Key // zero Name: the popup is off
+	settings [][2]string
+	theme    string
+	scr      *Screen // keeps a row for the status bar
+	bar      BarInfo
 
 	lastOutput time.Time // when the program last wrote
 	lastBar    string    // the bar as last drawn
@@ -228,6 +235,15 @@ func (c *client) run(winch <-chan os.Signal) (Result, error) {
 				}
 				c.send(fDetach, nil)
 				return Result{Detached: true}, nil
+			}
+			if c.info.Name != "" {
+				if i := c.info.find(k); i >= 0 {
+					if i > 0 {
+						c.sendInput(k[:i])
+					}
+					c.startInfo()
+					continue
+				}
 			}
 			c.sendInput(k)
 
@@ -341,6 +357,54 @@ func (c *client) startOverlay(payload []byte) {
 		}
 		o.done <- answerMsg{id, text}
 	}()
+}
+
+// startInfo shows the session's settings over everything until a key is
+// pressed. It is an overlay like a prompt: the program's output is held back
+// and the keys do not reach the program.
+func (c *client) startInfo() {
+	_ = unix.IoctlSetInt(int(c.in.Fd()), unix.TCFLSH, unix.TCIFLUSH)
+	ctx, cancel := context.WithCancel(context.Background())
+	o := &overlay{cancel: cancel, keys: make(chan byte, 64), armed: time.Now().Add(150 * time.Millisecond), done: make(chan answerMsg, 1)}
+	c.overlay = o
+	c.emit(c.tracker.Reset())
+	c.emitString("\x1b[?1049h\x1b[r\x1b[2J\x1b[H\x1b[?25l")
+	c.emitString(c.infoText(time.Now()))
+	go func() {
+		select {
+		case <-o.keys:
+		case <-ctx.Done():
+		}
+		o.done <- answerMsg{}
+	}()
+}
+
+// infoText is the popup: the settings as aligned lines, with the bar's colors
+// shown as they look.
+func (c *client) infoText(now time.Time) string {
+	rows := [][2]string{{"project", c.bar.Project}}
+	if c.bar.Label != "" {
+		rows = append(rows, [2]string{"program", c.bar.Label})
+	}
+	rows = append(rows, [2]string{"up since", c.bar.Started.Format("2006-01-02 15:04") + " (" + strings.TrimPrefix(uptime(now.Sub(c.bar.Started)), "up ") + ")"})
+	rows = append(rows, c.settings...)
+	rows = append(rows, [2]string{"keys", c.info.Name + " this popup, " + c.detach.Name + " detach"})
+	w := 0
+	for _, r := range rows {
+		if n := len(r[0]); n > w {
+			w = n
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString("\x1b[1mAIcatraz session\x1b[0m\r\n\r\n")
+	for _, r := range rows {
+		fmt.Fprintf(&sb, "  %-*s  %s\r\n", w, clean(r[0]), clean(r[1]))
+		if r[0] == "bar theme" {
+			fmt.Fprintf(&sb, "  %-*s  %s %s \x1b[0m\r\n", w, "", c.bar.style(), clean(c.theme))
+		}
+	}
+	sb.WriteString("\r\n\x1b[2many key closes\x1b[0m")
+	return sb.String()
 }
 
 func (o *overlay) keySource() approve.KeySource {
