@@ -7,6 +7,7 @@ project:    { id: ... }
 image:      ...
 volumes:    [ ... ]
 env:        { static: {...}, from_host: [...] }
+sudo:       false
 limits:     { pids: 1024, memory: 2g }
 approval:   { timeout: 2m }
 canary:     { action: stop, interval: 3s }
@@ -66,6 +67,19 @@ env:
 ```
 
 `from_host` passes names only, so values never show up in a process list. Secret-looking names (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`) get a warning: the agent can read them and has network access. A `PATH` in `static` is respected; the shim directory is always put in front.
+
+## `sudo`
+
+```yaml
+sudo: true      # default: false
+```
+
+Gives the jail user passwordless `sudo`. **This loosens the jail, read [the risks](security.md#sudo) first.** With `sudo: true`:
+
+1. **The user may use sudo without a password.** A drop-in file `/etc/sudoers.d/aicatraz` names your host user by number (`#1000 ALL=(ALL:ALL) NOPASSWD: ALL`), and PAM is set to accept the user, since the jail's passwd file is generated and has no password entry.
+2. **sudo is installed if the image doesn't have it.** Before the first start, aicatraz builds a small layer on top of your image (tagged `aicatraz/<project>:sudo`) that installs sudo and adds the sudoers entry. It knows how to install sudo on Debian, Ubuntu, Fedora, Alpine, Rocky, AlmaLinux, CentOS Stream, RHEL, Arch, openSUSE, Amazon Linux and their derivatives. For any other image it stops with an error: install sudo in your `Dockerfile.az` yourself, and aicatraz still adds the sudoers entry. An image without a shell can't be used.
+
+To make sudo work, the container runs differently: `no-new-privileges` is off, the root filesystem is writable (changes are thrown away when the container exits), and ten capabilities are kept instead of none (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`, `SETUID`, `SETGID`, `SETFCAP`, `KILL`, `AUDIT_WRITE`, `SYS_CHROOT`). Everything else stays dropped.
 
 ## `limits`
 

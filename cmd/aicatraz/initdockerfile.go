@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/schorsch3000/aicatraz/internal/osrelease"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
@@ -34,7 +34,7 @@ func runInitDockerfile(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer f.Close()
-	image, note, ok := baseImage(parseOsRelease(f))
+	image, note, ok := baseImage(osrelease.Parse(f))
 	if !ok {
 		ui.Error(stderr, "no matching base image for this distribution; write a `FROM <image>` line into %s yourself", dockerfileName)
 		return 1
@@ -53,21 +53,6 @@ func runInitDockerfile(args []string, stdout, stderr io.Writer) int {
 		ui.Note(stderr, "%s", note)
 	}
 	return 0
-}
-
-// parseOsRelease reads the KEY=value lines of an os-release file.
-func parseOsRelease(r io.Reader) map[string]string {
-	m := map[string]string{}
-	sc := bufio.NewScanner(r)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.HasPrefix(line, "#") {
-			continue
-		}
-		m[k] = strings.Trim(v, `"'`)
-	}
-	return m
 }
 
 // major returns the part of a version before the first dot.

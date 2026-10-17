@@ -69,10 +69,18 @@ func RunArgs(in RunInput) ([]string, error) {
 		"--label", "aicatraz.project="+in.ID,
 		"--user", fmt.Sprintf("%d:%d", in.UID, in.GID),
 		"--cap-drop=ALL",
-		"--security-opt=no-new-privileges",
-		"--read-only",
-		"--pids-limit", strconv.Itoa(pids),
 	)
+	if cfg.Sudo {
+		// sudo is a setuid program that needs a few capabilities, and
+		// installing packages needs a writable root filesystem. The container
+		// is removed on exit, so nothing written there survives.
+		for _, c := range SudoCaps {
+			args = append(args, "--cap-add="+c)
+		}
+	} else {
+		args = append(args, "--security-opt=no-new-privileges", "--read-only")
+	}
+	args = append(args, "--pids-limit", strconv.Itoa(pids))
 	if cfg.Limits.Memory != "" {
 		args = append(args, "--memory", cfg.Limits.Memory)
 	}

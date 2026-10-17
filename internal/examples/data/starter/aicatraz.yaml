@@ -16,6 +16,10 @@ volumes:
   - ./aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
   # - ./.env:hi                  # a secret the agent must not see
 
+# Passwordless sudo inside the jail (off by default). It loosens the jail: root
+# in the container, writable root filesystem. See docs/security.md.
+# sudo: true
+
 # Commands the agent may run on YOUR machine, outside the jail. Anything not
 # listed here can't run on the host. The first matching rule wins.
 #   allow  runs without asking

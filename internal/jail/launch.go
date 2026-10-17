@@ -82,6 +82,11 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 
+	baseRef := img.Ref // what the build produces, or the image as given
+	if cfg.Sudo {
+		img.Ref = SudoRef(id) // the container runs the image with sudo added
+	}
+
 	hideIsDir, err := inspectVolumes(cfg.Resolved)
 	if err != nil {
 		return 0, err
@@ -152,7 +157,10 @@ func Launch(o Options) (int, error) {
 
 	if o.Print {
 		if img.Build != nil {
-			fmt.Fprintln(o.Stdout, shellLine("docker", img.Build.Args(img.Ref)))
+			fmt.Fprintln(o.Stdout, shellLine("docker", img.Build.Args(baseRef)))
+		}
+		if cfg.Sudo {
+			fmt.Fprintf(o.Stdout, "# then, from %s: a layer with sudo and a sudoers entry for uid %d, tagged %s\n", baseRef, uid, img.Ref)
 		}
 		fmt.Fprintln(o.Stdout, shellLine("docker", runArgs))
 		return 0, nil
@@ -169,10 +177,15 @@ func Launch(o Options) (int, error) {
 		if err := ApproveBuild(store, *img.Build, o.ApproveBuild, terminalPrompt(os.Stdin, os.Stderr, cfg)); err != nil {
 			return 0, err
 		}
-		cmd := exec.Command("docker", img.Build.Args(img.Ref)...)
+		cmd := exec.Command("docker", img.Build.Args(baseRef)...)
 		cmd.Stdout, cmd.Stderr = o.Stderr, o.Stderr // keep stdout clean for the command's own output
 		if err := cmd.Run(); err != nil {
 			return 0, fmt.Errorf("docker build failed: %w", err)
+		}
+	}
+	if cfg.Sudo {
+		if err := BuildSudoImage(baseRef, img.Ref, uid, o.Stderr); err != nil {
+			return 0, err
 		}
 	}
 	if err := writeIdentity(img.Ref, state, uid, gid, cur.Username, home); err != nil {

@@ -236,6 +236,39 @@ func TestImageWithOtherUser(t *testing.T) {
 	}
 }
 
+func TestSudo(t *testing.T) {
+	p := newProject(t)
+	p.write(".env", "SECRET=1\n")
+	p.write("aicatraz.yaml", "project: {id: it-sudo}\nimage: debian:stable-slim\nsudo: true\nvolumes:\n  - ~/p:rw\n  - ~/p/.env:hi\n")
+	exec.Command("docker", "rmi", "-f", "aicatraz/it-sudo:sudo").Run()
+	t.Cleanup(func() { exec.Command("docker", "rmi", "-f", "aicatraz/it-sudo:sudo").Run() })
+
+	// The user stays the host user; sudo is root, passwordless, and can install packages.
+	stdout, stderr, code := p.run("sh", "-c", "id -u; sudo -n id -u; sudo -n sh -c 'apt-get update -qq && apt-get install -y -qq cowsay >/dev/null && echo installed'")
+	if code != 0 || stdout != fmt.Sprintf("%d\n0\ninstalled\n", os.Getuid()) {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+
+	// Root still can't see or undo what the jail hides or protects.
+	stdout, _, _ = p.run("sudo", "-n", "sh", "-c", "wc -c < .env; umount .env 2>&1; echo x > /etc/passwd 2>&1; touch /aicatraz/bin/x 2>&1")
+	if !strings.Contains(stdout, "0\n") || !strings.Contains(stdout, "must be superuser") ||
+		!strings.Contains(stdout, "Read-only file system") {
+		t.Errorf("root escaped a protection: %s", stdout)
+	}
+	if b, _ := os.ReadFile(filepath.Join(p.dir, ".env")); string(b) != "SECRET=1\n" {
+		t.Errorf(".env changed on the host: %q", b)
+	}
+}
+
+func TestSudoOffByDefault(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\n")
+	stdout, _, _ := p.run("sh", "-c", "command -v sudo || echo no-sudo; touch /etc/x 2>&1; grep NoNewPrivs /proc/self/status")
+	if !strings.Contains(stdout, "Read-only file system") || !strings.Contains(stdout, "NoNewPrivs:\t1") {
+		t.Errorf("hardening must stay on without sudo: %s", stdout)
+	}
+}
+
 func TestBuildRefusesLeakingContext(t *testing.T) {
 	p := newProject(t)
 	p.write(".env", "SECRET=1\n")

@@ -48,6 +48,15 @@ Everything the container sends is a *request*: command name, arguments, working 
 8. **The broker is one process per session.** If it dies, the shim fails clearly instead of hanging, and nothing runs on the host. A broker that was killed hard leaves a socket directory behind, cleaned up on the next start.
 9. **`local` is not a boundary.** It runs the jail's binary in the jail; it only decides *where*, never what the agent may do inside.
 
+## Sudo
+
+`sudo: true` is a deliberate hole in the hardening, off by default. It gives the agent root inside the container, so the agent can install packages, change anything in the container, and read and write every file on your read-write volumes regardless of its permissions. In exchange:
+
+- **What stays enforced for root:** hidden paths still read as empty and can't be unmounted or deleted, read-only volumes and the generated `/etc/passwd` and `/etc/group` stay read-only, root has no `SYS_ADMIN`, `NET_ADMIN`, `NET_RAW`, `SYS_PTRACE`, `MKNOD` or `DAC_READ_SEARCH`, and the broker still only accepts your UID, so root can't speak for you at the door.
+- **What is lost:** `no-new-privileges` and the read-only root filesystem (the container is removed on exit, so the writable layer doesn't survive), and the capability set is no longer empty. Anything that relies on the agent being unable to become root inside the container, such as a rule that trusts files the agent can only write with root rights, no longer holds.
+- **Files created as root** in a read-write volume stay owned by root on your machine (`sudo npm install` in the project, for example). You may need to `sudo chown` them back.
+- It is still a container: an escape needs a kernel or Docker bug, as before, but the extra capabilities widen the surface somewhat.
+
 ## Reporting a problem
 
 This is early software with a test suite that includes an adversarial part (forged binary paths, escape sequences in arguments, symlink and `..` tricks, changed files during approval, exposed hidden paths). If you find a way around a guarantee above, please report it with the exact config and commands.

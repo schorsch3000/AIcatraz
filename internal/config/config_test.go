@@ -314,3 +314,17 @@ func TestCanaryDefaults(t *testing.T) {
 		t.Fatalf("%+v %+v", ps, cfg.Canary)
 	}
 }
+
+func TestSudoOption(t *testing.T) {
+	cfg, ps := Parse([]byte("sudo: true\n"), opts)
+	if len(ps) != 0 || !cfg.Sudo {
+		t.Errorf("sudo: true: %+v %v", ps, cfg.Sudo)
+	}
+	cfg, ps = Parse([]byte("volumes: []\n"), opts)
+	if len(ps) != 0 || cfg.Sudo {
+		t.Errorf("sudo must default to off: %+v %v", ps, cfg.Sudo)
+	}
+	if _, ps = Parse([]byte("sudo: maybe\n"), opts); len(ps) == 0 {
+		t.Error("sudo: maybe must be rejected")
+	}
+}

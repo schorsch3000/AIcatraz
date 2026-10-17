@@ -23,6 +23,10 @@ type Config struct {
 	Rules    []Rule    `yaml:"rules"`
 	Agent    Agent     `yaml:"agent"`
 
+	// Sudo gives the user passwordless sudo in the jail (see docs/security.md
+	// for what that costs). Default off.
+	Sudo bool `yaml:"sudo"`
+
 	// Resolved is filled in by validation: volumes with ~ expanded and the mode parsed.
 	Resolved []Volume `yaml:"-"`
 }

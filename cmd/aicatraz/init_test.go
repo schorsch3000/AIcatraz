@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"github.com/schorsch3000/aicatraz/internal/osrelease"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,12 +116,12 @@ func TestBaseImage(t *testing.T) {
 		{"ID=raspbian\nID_LIKE=debian", "debian:stable"},
 	}
 	for _, c := range cases {
-		got, _, ok := baseImage(parseOsRelease(strings.NewReader(c.rel)))
+		got, _, ok := baseImage(osrelease.Parse(strings.NewReader(c.rel)))
 		if !ok || got != c.want {
 			t.Errorf("%q: got %q (ok=%v), want %q", c.rel, got, ok, c.want)
 		}
 	}
-	if _, _, ok := baseImage(parseOsRelease(strings.NewReader("ID=plan9"))); ok {
+	if _, _, ok := baseImage(osrelease.Parse(strings.NewReader("ID=plan9"))); ok {
 		t.Error("unknown distribution should not match")
 	}
 }
