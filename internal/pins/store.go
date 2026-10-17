@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package pins remembers which version of a file a human last approved, so a
 // rule that really means "run whatever this Makefile says" notices when the
 // Makefile changes.

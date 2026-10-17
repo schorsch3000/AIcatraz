@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Command aicatraz is a single binary that acts as launcher, broker and shim
 // depending on the name it is invoked under.
 package main

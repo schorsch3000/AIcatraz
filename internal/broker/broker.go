@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package broker is the host side of the command proxy. It accepts requests
 // from the in-container shim over a unix socket, applies the policy, and runs
 // allowed commands on the host.

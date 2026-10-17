@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package policy decides what happens to a command the agent asks to run.
 // First matching rule wins; no match means deny.
 package policy

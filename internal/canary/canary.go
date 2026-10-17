@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package canary checks, from inside the container, that hidden paths are
 // still hidden.
 //

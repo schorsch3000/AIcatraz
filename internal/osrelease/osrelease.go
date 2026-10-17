@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package osrelease reads os-release files, which describe a Linux distribution.
 package osrelease
 

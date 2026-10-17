@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package egress limits what the jail may connect to. A sidecar container owns
 // the jail's network: nftables rejects everything the rules do not allow
 // outright, redirects every TCP connection to a transparent proxy that asks

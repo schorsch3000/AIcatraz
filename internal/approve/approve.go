@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package approve asks the human whether a host command may run. The prompt
 // is shown on a terminal the agent can't type into or write to.
 package approve

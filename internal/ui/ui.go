@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package ui adds terminal colors to aicatraz's own output. Color is only
 // used when the output is a terminal; NO_COLOR turns it off, and
 // AICATRAZ_COLOR=always|never overrides the detection.

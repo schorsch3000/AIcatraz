@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package mux is a small terminal multiplexer: it runs one program on a
 // pseudo-terminal, keeps it alive when nobody is attached, and lets a client
 // attach and detach. It also owns the approval prompt: a request from the

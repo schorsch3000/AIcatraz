@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package jail turns a validated config into a hardened container and runs it.
 package jail
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package agent knows how to run coding agents (Claude Code, opencode) inside
 // the jail: where they are installed, which of the user's configuration they
 // get, how they are started, and how their sessions are tracked.

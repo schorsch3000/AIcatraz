@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package examples holds the starter configurations `aicatraz init` writes.
 package examples
 

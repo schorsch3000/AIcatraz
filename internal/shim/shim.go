@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package shim is the in-container side of the command proxy. It runs in
 // place of a proxied command, forwards the call to the host broker, and
 // behaves like the command: same output, same exit code.

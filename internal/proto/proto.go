@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package proto is the wire protocol between the in-container shim and the
 // host broker: length-prefixed frames over a unix stream socket.
 package proto

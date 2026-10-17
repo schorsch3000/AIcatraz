@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package glob compiles path patterns: `*` and `?` stay within one path
 // segment, `**` crosses segments, `[...]` is a class (`[!...]` negated), `\`
 // escapes. This is the syntax of .dockerignore and of depends_on patterns.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package config loads and validates the AIcatraz YAML configuration.
 package config
 
