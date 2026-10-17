@@ -1,9 +1,19 @@
-# aicatraz.yaml: describes the jail for this project.
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  aicatraz.yaml                                                         ║
+# ║  Describes the jail for this project. Everything below is optional.    ║
+# ╚════════════════════════════════════════════════════════════════════════╝
 #
 #   aicatraz config check     check this file
 #   aicatraz run              start a shell in the jail
 #   aicatraz claude           start Claude Code in the jail (also: opencode)
-#   aicatraz up               like run, in a tmux session, so prompts can pop up
+#   aicatraz up               like run, as a session you can detach from (Ctrl-Y)
+#
+# Lines starting with `# key:` are examples: remove the `# ` to switch one on.
+
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  PROJECT AND IMAGE                                                     ║
+# ║  Who this project is, and what the jail runs on.                       ║
+# ╚════════════════════════════════════════════════════════════════════════╝
 
 # Name of this project's state (pins, sessions, image). By default it is derived from
 # the directory name and the config's real path; set it to keep your history when the
@@ -18,7 +28,11 @@
 #   dockerfile: Dockerfile.az
 #   context: .
 
-# What the agent can see. Everything else on your machine is invisible to it.
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  VOLUMES                                                               ║
+# ║  What the agent can see. Everything else on your machine is invisible. ║
+# ╚════════════════════════════════════════════════════════════════════════╝
+
 #   path:rw   read and write
 #   path:ro   read only
 #   path:hi   hidden: reads as empty (the path must exist, inside an rw/ro volume)
@@ -29,19 +43,10 @@ volumes:
   - ./aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
   # - ./.env:hi                  # a secret the agent must not see
 
-# Environment variables in the jail.
-# env:
-#   static: {EDITOR: vim}          # fixed values
-#   from_host: [AWS_PROFILE]       # copied from your shell at launch (the agent can read them)
-
-# Resource limits for the jail.
-# limits:
-#   pids: 1024                     # maximum number of processes
-#   memory: 2g                     # no limit if unset
-
-# Passwordless sudo inside the jail. It loosens the jail: root in the container,
-# a writable root filesystem and some capabilities. See docs/security.md.
-sudo: false
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  NETWORK                                                               ║
+# ║  What the jail can reach, and what can reach the jail.                 ║
+# ╚════════════════════════════════════════════════════════════════════════╝
 
 # The jail's network. With no section, or `network: off`, the jail has no network
 # at all. `network: open` lets it connect anywhere. A mapping like the one below
@@ -73,10 +78,14 @@ network: off
 #   - 3000                       # http://127.0.0.1:3000 -> port 3000 in the jail
 #   - "8080:80"
 
-# Hardware to hand to the jail while it is plugged in: Arduino, ESP and Pico
-# boards, USB serial adapters. The jail gets the device nodes of the devices you
-# name, created when they appear and removed when they disappear, also after a
-# reset or a re-plug. `aicatraz devices` lists what is plugged in.
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  HARDWARE                                                              ║
+# ║  Arduino, ESP and Pico boards, USB serial adapters.                    ║
+# ╚════════════════════════════════════════════════════════════════════════╝
+
+# Hardware to hand to the jail while it is plugged in. The jail gets the device nodes
+# of the devices you name, created when they appear and removed when they disappear,
+# also after a reset or a re-plug. `aicatraz devices` lists what is plugged in.
 # devices:
 #   - serial: "usb-Arduino_*"      # a name under /dev/serial/by-id, * allowed
 #   - usb: "2e8a:*"                # vendor:product (a Raspberry Pi Pico), * allowed
@@ -84,33 +93,34 @@ network: off
 #     usb_serial: "A5069*"         # ... with this serial number
 #   - path: /dev/ttyUSB0           # a fixed device node
 
-# The look of the status bar of `aicatraz up` sessions, to tell projects apart at a
-# glance (a red bar for the project that deploys). `aicatraz bar-colors` shows the
-# themes. A flag overrides this, and this overrides your AICATRAZ_BAR_* variables.
-# bar:
-#   theme: brick                 # a name from `aicatraz bar-colors`
-#   fg: white                    # text color: a name, 0-255, #rrggbb or default
-#   bg: "#102030"                # background; fg and bg override the theme's
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  INSIDE THE JAIL                                                       ║
+# ║  Environment, resource limits and sudo.                                ║
+# ╚════════════════════════════════════════════════════════════════════════╝
 
-# How long an `ask` prompt waits before it counts as a deny (5s to 1h).
-# approval:
-#   timeout: 2m
+# Environment variables in the jail.
+# env:
+#   static: {EDITOR: vim}          # fixed values
+#   from_host: [AWS_PROFILE]       # copied from your shell at launch (the agent can read them)
 
-# What happens when a hidden path turns out to be visible (say, replaced on the host):
-# stop the session (default), warn once, or off.
-# canary:
-#   action: stop
-#   interval: 3s
+# Resource limits for the jail.
+# limits:
+#   pids: 1024                     # maximum number of processes
+#   memory: 2g                     # no limit if unset
 
-# Variable names (globs) that are never passed to a host command, on top of the
-# built-in set (LD_*, PATH, BASH_ENV, ...).
-# global:
-#   env_strip: ["AWS_*"]
+# Passwordless sudo inside the jail. It loosens the jail: root in the container,
+# a writable root filesystem and some capabilities. See docs/security.md.
+sudo: false
+
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  THE DOOR TO YOUR MACHINE                                              ║
+# ║  Commands the agent may run outside the jail, and how you are asked.   ║
+# ╚════════════════════════════════════════════════════════════════════════╝
 
 # Commands the agent may run on YOUR machine, outside the jail. Anything not
 # listed here can't run on the host. The first matching rule wins.
 #   allow  runs without asking
-#   ask    asks you first (a popup in tmux, or --approval-tty)
+#   ask    asks you first (an overlay in `aicatraz up`, a popup in tmux, or --approval-tty)
 #   local  runs the jail's own copy of the command, inside the jail
 #   deny   refuses
 # rules:
@@ -132,9 +142,41 @@ network: off
 #     decision: ask
 #     env_pass: [AWS_REGION]       # variables passed on from the jail
 
-# The coding agent for `aicatraz agent` (`aicatraz claude` and `aicatraz opencode`
-# need no config).
+# How long an `ask` prompt waits before it counts as a deny (5s to 1h).
+# approval:
+#   timeout: 2m
+
+# What happens when a hidden path turns out to be visible (say, replaced on the host):
+# stop the session (default), warn once, or off.
+# canary:
+#   action: stop
+#   interval: 3s
+
+# Variable names (globs) that are never passed to a host command, on top of the
+# built-in set (LD_*, PATH, BASH_ENV, ...).
+# global:
+#   env_strip: ["AWS_*"]
+
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  CODING AGENT                                                          ║
+# ║  `aicatraz claude` and `aicatraz opencode` need no config.             ║
+# ╚════════════════════════════════════════════════════════════════════════╝
+
+# The coding agent for `aicatraz agent`.
 # agent:
 #   tool: claude                   # or opencode
 #   version: latest                # or a pinned version
 #   skip_permissions: true         # the jail is the boundary, so the agent's own prompts are redundant
+
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  LOOK                                                                  ║
+# ║  The status bar of `aicatraz up` sessions.                             ║
+# ╚════════════════════════════════════════════════════════════════════════╝
+
+# To tell projects apart at a glance (a red bar for the project that deploys).
+# `aicatraz bar-colors` shows the themes. A flag overrides this, and this overrides
+# your AICATRAZ_BAR_* variables.
+# bar:
+#   theme: brick                 # a name from `aicatraz bar-colors`
+#   fg: white                    # text color: a name, 0-255, #rrggbb or default
+#   bg: "#102030"                # background; fg and bg override the theme's
