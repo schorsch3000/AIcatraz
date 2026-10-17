@@ -9,10 +9,12 @@
 #   path:rw   read and write
 #   path:ro   read only
 #   path:hi   hidden: reads as empty (the path must exist, inside an rw/ro volume)
+# Paths starting with ./ or ../ are relative to this file, so the config works
+# for everyone, wherever they check the project out. `~/x` and absolute paths work too.
 volumes:
-  - {{PROJECT}}:rw
-  - {{PROJECT}}/aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
-  # - {{PROJECT}}/.env:hi        # a secret the agent must not see
+  - .:rw
+  - ./aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
+  # - ./.env:hi                  # a secret the agent must not see
 
 # Commands the agent may run on YOUR machine, outside the jail. Anything not
 # listed here can't run on the host. The first matching rule wins.

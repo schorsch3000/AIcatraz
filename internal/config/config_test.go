@@ -8,6 +8,30 @@ import (
 
 var opts = Options{Home: "/home/test"}
 
+func TestRelativeVolumesResolveAgainstTheConfigDirectory(t *testing.T) {
+	o := Options{Home: "/home/test", Dir: "/srv/checkout/app"}
+	cfg, ps := Parse([]byte("volumes:\n  - .:rw\n  - ./.env:hi\n  - ../shared:ro\n  - ~/x:ro\n  - /opt/y:ro\n"), o)
+	if len(ps) != 0 {
+		t.Fatalf("problems: %+v", ps)
+	}
+	want := []string{"/srv/checkout/app", "/srv/checkout/app/.env", "/srv/checkout/shared", "/home/test/x", "/opt/y"}
+	for i, w := range want {
+		if cfg.Resolved[i].Path != w {
+			t.Errorf("volume %d: got %q, want %q", i, cfg.Resolved[i].Path, w)
+		}
+	}
+
+	// Bare names stay an error; relative paths can't sneak in the home directory.
+	_, ps = Parse([]byte("volumes:\n  - foo:rw\n"), o)
+	if len(ps) != 1 || !strings.Contains(ps[0].Msg, "./") {
+		t.Errorf("bare name: %+v", ps)
+	}
+	_, ps = Parse([]byte("volumes:\n  - .:rw\n"), Options{Home: "/srv/checkout/app", Dir: "/srv/checkout/app"})
+	if len(ps) != 1 || !strings.Contains(ps[0].Msg, "home directory") {
+		t.Errorf("relative path to home: %+v", ps)
+	}
+}
+
 func TestValidExample(t *testing.T) {
 	data, err := os.ReadFile("testdata/valid.yaml")
 	if err != nil {

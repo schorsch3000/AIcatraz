@@ -73,8 +73,8 @@ Hide a secret, so the agent sees an empty file:
 
 ```yaml
 volumes:
-  - ~/git/myproject:rw
-  - ~/git/myproject/.env:hi      # must exist
+  - .:rw                         # relative to this file, so it works for the whole team
+  - ./.env:hi                    # must exist
 ```
 
 Let the agent deploy through you, with a brake:

@@ -60,9 +60,9 @@ func List() []Example {
 	return out
 }
 
-// Render returns the example's files with {{PROJECT}} replaced by project
-// (the path to mount, as it should appear in the config).
-func Render(name, project string) (map[string]string, error) {
+// Render returns the files of an example. The configs mount the project as
+// `.`, relative to the config file, so they work wherever it is checked out.
+func Render(name string) (map[string]string, error) {
 	files, err := fs.ReadDir(data, "data/"+name)
 	if err != nil {
 		var names []string
@@ -77,23 +77,19 @@ func Render(name, project string) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		out[f.Name()] = strings.ReplaceAll(string(b), "{{PROJECT}}", project)
+		out[f.Name()] = string(b)
 	}
 	return out, nil
 }
 
-// ProjectPath is how dir is written in a config: ~/relative if it lies under
-// the home directory, else absolute. The home directory itself, its parents
-// and the root can't be mounted.
-func ProjectPath(dir, home string) (string, error) {
+// CheckProjectDir refuses a directory that can't be the project: the home
+// directory itself, one of its parents, or the root.
+func CheckProjectDir(dir, home string) error {
 	dir = filepath.Clean(dir)
 	if dir == "/" || dir == home || strings.HasPrefix(home+"/", dir+"/") {
-		return "", fmt.Errorf("%s contains your home directory, so it can't be the project; run this in a project directory", dir)
+		return fmt.Errorf("%s contains your home directory, so it can't be the project; run this in a project directory", dir)
 	}
-	if rel, err := filepath.Rel(home, dir); err == nil && !strings.HasPrefix(rel, "..") {
-		return "~/" + rel, nil
-	}
-	return dir, nil
+	return nil
 }
 
 // Home returns the user's home directory.

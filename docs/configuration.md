@@ -42,12 +42,12 @@ The image's `ENTRYPOINT` and `CMD` are replaced. The container runs as your UID 
 
 ```yaml
 volumes:
-  - ~/git/project:rw
+  - .:rw                 # the directory holding this file
   - ~/tools/mytool:ro
-  - ~/git/project/.env:hi
+  - ./.env:hi
 ```
 
-`path:mode`, `~` expanded on the host, and the path is the **same inside the container**.
+`path:mode`. A path may be absolute, start with `~/` (your home), or start with `./` or `../`: those are relative to the directory of the config file, not to where you run the command. A config with only relative paths works for every teammate, wherever they check the project out. (A bare `foo` is an error, to catch typos.) Whatever the form, the path is resolved on the host and is the **same inside the container**.
 
 | Mode | In the jail |
 |---|---|

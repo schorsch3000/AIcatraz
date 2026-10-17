@@ -56,12 +56,11 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	if real, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = real
 	}
-	project, err := examples.ProjectPath(cwd, home)
-	if err != nil {
+	if err := examples.CheckProjectDir(cwd, home); err != nil {
 		ui.Error(stderr, "%v", err)
 		return 2
 	}
-	files, err := examples.Render(name, project)
+	files, err := examples.Render(name)
 	if err != nil {
 		ui.Error(stderr, "%v", err)
 		return 2

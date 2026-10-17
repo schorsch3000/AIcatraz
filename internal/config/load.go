@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -14,9 +15,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Options tune loading. Home is the host home directory used to expand `~`.
+// Options tune loading. Home is the host home directory used to expand `~`;
+// Dir is the directory relative volume paths (`.`, `./x`, `../x`) are
+// resolved against, normally the directory holding the config file.
 type Options struct {
 	Home string
+	Dir  string
 }
 
 // LoadFile reads and validates a config file.
@@ -30,6 +34,13 @@ func LoadFile(path string, opts Options) (*Config, []Problem, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("cannot determine home directory: %w", err)
 		}
+	}
+	if opts.Dir == "" {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		opts.Dir = filepath.Dir(abs)
 	}
 	cfg, problems := Parse(data, opts)
 	return cfg, problems, nil
@@ -60,7 +71,7 @@ func Parse(data []byte, opts Options) (*Config, []Problem) {
 		return nil, []Problem{yamlProblem(err)}
 	}
 
-	v := &validator{root: &root, home: opts.Home}
+	v := &validator{root: &root, home: opts.Home, dir: opts.Dir}
 	v.validate(cfg)
 	sort.SliceStable(v.problems, func(i, j int) bool { return v.problems[i].Line < v.problems[j].Line })
 	return cfg, v.problems

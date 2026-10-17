@@ -44,6 +44,7 @@ func IsNeverPass(name string) bool {
 type validator struct {
 	root     *yaml.Node
 	home     string
+	dir      string // base for relative volume paths
 	problems []Problem
 }
 
@@ -91,8 +92,21 @@ func (v *validator) image(c *Config) {
 	}
 }
 
-// expandHome expands a leading ~ using the host home directory.
+// isRelative reports whether a volume path is written relative to the config
+// file: `.`, `..`, `./x` or `../x`. A bare `x` is not, to keep typos visible.
+func isRelative(s string) bool {
+	return s == "." || s == ".." || strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../")
+}
+
+// expandHome expands a leading ~ using the host home directory, and a
+// relative path using the config file's directory.
 func (v *validator) expandHome(s string) (string, error) {
+	if isRelative(s) {
+		if v.dir == "" {
+			return "", fmt.Errorf("%q: relative paths need to know the config file's directory", s)
+		}
+		return filepath.Join(v.dir, s), nil
+	}
 	if s == "~" {
 		return v.home, nil
 	}
@@ -131,7 +145,7 @@ func (v *validator) volumes(c *Config) {
 			continue
 		}
 		if !filepath.IsAbs(full) {
-			v.errorf(p, "volume %q: path must be absolute or start with ~/", spec)
+			v.errorf(p, "volume %q: path must be absolute, or start with ~/, ./ or ../", spec)
 			continue
 		}
 		full = filepath.Clean(full)

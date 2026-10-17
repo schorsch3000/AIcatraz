@@ -4,8 +4,8 @@
 # the image from Dockerfile.az (you are asked to approve it, answer p to
 # remember), and copies your opencode settings in.
 volumes:
-  - {{PROJECT}}:rw
-  - {{PROJECT}}/aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
+  - .:rw
+  - ./aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
 
 agent:
   tool: opencode

@@ -14,19 +14,19 @@ func TestEveryExampleIsAValidConfigWithoutWarnings(t *testing.T) {
 	}
 	for _, ex := range list {
 		t.Run(ex.Name, func(t *testing.T) {
-			files, err := Render(ex.Name, "~/proj")
+			files, err := Render(ex.Name)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if ex.Description == "" {
 				t.Error("every example needs a description")
 			}
-			cfg, ps := config.Parse([]byte(files[ConfigFile]), config.Options{Home: "/home/u"})
+			cfg, ps := config.Parse([]byte(files[ConfigFile]), config.Options{Home: "/home/u", Dir: "/srv/checkout/proj"})
 			if cfg == nil || len(ps) != 0 {
 				t.Fatalf("problems: %+v\n%s", ps, files[ConfigFile])
 			}
-			if len(cfg.Resolved) == 0 || cfg.Resolved[0].Path != "/home/u/proj" {
-				t.Errorf("project path not substituted: %+v", cfg.Resolved)
+			if len(cfg.Resolved) == 0 || cfg.Resolved[0].Path != "/srv/checkout/proj" {
+				t.Errorf("project not resolved relative to the config: %+v", cfg.Resolved)
 			}
 			for name, content := range files {
 				if strings.Contains(content, "{{") {
@@ -42,7 +42,7 @@ func TestEveryExampleIsAValidConfigWithoutWarnings(t *testing.T) {
 
 func TestAgentExamplesShipADockerfile(t *testing.T) {
 	for _, n := range []string{"claude", "opencode"} {
-		files, _ := Render(n, "~/p")
+		files, _ := Render(n)
 		df, ok := files["Dockerfile.az"]
 		if !ok || !strings.Contains(df, "FROM debian") || !strings.Contains(df, "nodejs") {
 			t.Errorf("%s: Dockerfile.az missing or not glibc-based with node:\n%s", n, df)
@@ -54,24 +54,19 @@ func TestAgentExamplesShipADockerfile(t *testing.T) {
 }
 
 func TestRenderUnknown(t *testing.T) {
-	if _, err := Render("nope", "~/p"); err == nil || !strings.Contains(err.Error(), "starter") {
+	if _, err := Render("nope"); err == nil || !strings.Contains(err.Error(), "starter") {
 		t.Errorf("%v", err)
 	}
 }
 
-func TestProjectPath(t *testing.T) {
-	for dir, want := range map[string]string{
-		"/home/u/git/p": "~/git/p",
-		"/srv/work/p":   "/srv/work/p",
-		"/home/u/p/":    "~/p",
-	} {
-		got, err := ProjectPath(dir, "/home/u")
-		if err != nil || got != want {
-			t.Errorf("%s: %q %v", dir, got, err)
+func TestCheckProjectDir(t *testing.T) {
+	for _, ok := range []string{"/home/u/git/p", "/srv/work/p", "/home/u/p/"} {
+		if err := CheckProjectDir(ok, "/home/u"); err != nil {
+			t.Errorf("%s: %v", ok, err)
 		}
 	}
 	for _, bad := range []string{"/home/u", "/home", "/"} {
-		if _, err := ProjectPath(bad, "/home/u"); err == nil {
+		if err := CheckProjectDir(bad, "/home/u"); err == nil {
 			t.Errorf("%s must be refused", bad)
 		}
 	}

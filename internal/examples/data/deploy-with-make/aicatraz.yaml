@@ -1,7 +1,7 @@
 # Build and test inside the jail; deploy from the host, with a brake.
 volumes:
-  - {{PROJECT}}:rw
-  - {{PROJECT}}/aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
+  - .:rw
+  - ./aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
 
 rules:
   # Everyday work runs in the jail.
