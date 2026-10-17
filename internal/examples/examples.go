@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -64,7 +65,10 @@ func List() []Example {
 
 // Render returns the files of an example. The configs mount the project as
 // `.`, relative to the config file, so they work wherever it is checked out.
-func Render(name string) (map[string]string, error) {
+//
+// dir is the name of the directory the project is in: `{{PROJECT}}` in an
+// example becomes a project id made from it (see ProjectName).
+func Render(name, dir string) (map[string]string, error) {
 	files, err := fs.ReadDir(data, "data/"+name)
 	if err != nil {
 		var names []string
@@ -79,9 +83,26 @@ func Render(name string) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		out[f.Name()] = string(b)
+		out[f.Name()] = strings.ReplaceAll(string(b), "{{PROJECT}}", ProjectName(dir))
 	}
 	return out, nil
+}
+
+var notIDChar = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// ProjectName makes a project id (letters, digits, '.', '_', '-', starting with
+// a letter or digit) from the name of a directory. "my project!" becomes
+// "my-project"; a name with nothing usable in it becomes "my-project".
+func ProjectName(dir string) string {
+	name := notIDChar.ReplaceAllString(filepath.Base(dir), "-")
+	name = strings.Trim(name, "-._")
+	if len(name) > 64 {
+		name = strings.Trim(name[:64], "-._")
+	}
+	if name == "" {
+		return "my-project"
+	}
+	return name
 }
 
 // CheckProjectDir refuses a directory that can't be the project: the home

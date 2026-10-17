@@ -30,6 +30,9 @@ func TestInitWritesAValidConfig(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "aicatraz.yaml"))
+	if err == nil && !strings.Contains(string(b), "#   id: proj\n") {
+		t.Errorf("the example project id is the directory's name:\n%s", b)
+	}
 	if err != nil || !strings.Contains(string(b), "- .:rw") {
 		t.Fatalf("%v\n%s", err, b)
 	}

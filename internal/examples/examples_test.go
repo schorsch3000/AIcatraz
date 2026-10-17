@@ -17,7 +17,7 @@ func TestEveryExampleIsAValidConfigWithoutWarnings(t *testing.T) {
 	}
 	for _, ex := range list {
 		t.Run(ex.Name, func(t *testing.T) {
-			files, err := Render(ex.Name)
+			files, err := Render(ex.Name, "/home/u/demo")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -45,7 +45,7 @@ func TestEveryExampleIsAValidConfigWithoutWarnings(t *testing.T) {
 
 func TestAgentExamplesShipADockerfile(t *testing.T) {
 	for _, n := range []string{"claude", "opencode"} {
-		files, _ := Render(n)
+		files, _ := Render(n, "/home/u/demo")
 		df, ok := files["Dockerfile.az"]
 		if !ok || !strings.Contains(df, "FROM debian") || !strings.Contains(df, "nodejs") {
 			t.Errorf("%s: Dockerfile.az missing or not glibc-based with node:\n%s", n, df)
@@ -57,7 +57,7 @@ func TestAgentExamplesShipADockerfile(t *testing.T) {
 }
 
 func TestRenderUnknown(t *testing.T) {
-	if _, err := Render("nope"); err == nil || !strings.Contains(err.Error(), "starter") {
+	if _, err := Render("nope", "/x"); err == nil || !strings.Contains(err.Error(), "starter") {
 		t.Errorf("%v", err)
 	}
 }
@@ -78,7 +78,7 @@ func TestCheckProjectDir(t *testing.T) {
 // The starter config documents every option in comments. Uncommented, those
 // examples must be valid and free of linter warnings, so they can't rot.
 func TestStarterCommentedOptionsAreValid(t *testing.T) {
-	files, err := Render("starter")
+	files, err := Render("starter", "/home/u/demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,5 +120,29 @@ func TestStarterCommentedOptionsAreValid(t *testing.T) {
 		if cfg == nil || len(ps) != 0 {
 			t.Errorf("uncommented starter has problems: %+v\n%s", ps, text)
 		}
+	}
+}
+
+func TestProjectNameFromTheDirectory(t *testing.T) {
+	for dir, want := range map[string]string{
+		"/foo/bar/baz":                   "baz",
+		"/foo/bar/baz/":                  "baz",
+		"/home/u/My Project":             "My-Project",
+		"/x/--weird__":                   "weird",
+		"/x/a  b!!c":                     "a-b-c",
+		"/x/.hidden":                     "hidden",
+		"/x/v1.2_beta-3":                 "v1.2_beta-3",
+		"/":                              "my-project",
+		"/x/!!!":                         "my-project",
+		"/x/ünï":                         "n", // only ASCII letters and digits are kept
+		"/x/" + strings.Repeat("a", 100): strings.Repeat("a", 64),
+	} {
+		if got := ProjectName(dir); got != want {
+			t.Errorf("ProjectName(%q) = %q, want %q", dir, got, want)
+		}
+	}
+	files, _ := Render("starter", "/foo/bar/baz")
+	if !strings.Contains(files[ConfigFile], "#   id: baz\n") || strings.Contains(files[ConfigFile], "{{") {
+		t.Errorf("the starter's example id should be the directory's name:\n%s", files[ConfigFile])
 	}
 }

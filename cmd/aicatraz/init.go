@@ -62,7 +62,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		ui.Error(stderr, "%v", err)
 		return 2
 	}
-	files, err := examples.Render(name)
+	files, err := examples.Render(name, cwd)
 	if err != nil {
 		ui.Error(stderr, "%v", err)
 		return 2

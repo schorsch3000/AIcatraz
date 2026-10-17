@@ -19,7 +19,7 @@
 # the directory name and the config's real path; set it to keep your history when the
 # project moves.
 # project:
-#   id: my-project
+#   id: {{PROJECT}}
 
 # The image the jail runs in. By default: Dockerfile.az next to this file if there is
 # one (`aicatraz init dockerfile` writes one), else a plain Debian.
