@@ -601,3 +601,33 @@ func TestBarSection(t *testing.T) {
 	check("bar: {bg: '#12'}", "color")
 	check("bar: {colour: red}", "not found")
 }
+
+// A leading space on a switched-on example makes the YAML reader stop quietly
+// at the first line that is indented less, and ignore the rest of the file.
+// That must be an error, not a config that silently has half its keys.
+func TestAnIndentedFirstKeyIsNotSilentlyTruncated(t *testing.T) {
+	cases := map[string]int{
+		" project:\n   id: x\n\nvolumes:\n  - .:rw\nsudo: true\n": 4,
+		"volumes:\n  - .:rw\n  sudo: true\n":                      0, // a plain mistake of another kind: not our check
+	}
+	for doc, wantLine := range cases {
+		_, ps := Parse([]byte(doc), opts)
+		if wantLine == 0 {
+			continue
+		}
+		if len(ps) != 1 || ps[0].Severity != Error || !strings.Contains(ps[0].Msg, "not read from here on") || !strings.Contains(ps[0].Msg, "remove the space after it") || ps[0].Line == 0 {
+			t.Errorf("%q: %+v", doc, ps)
+		}
+	}
+	_, ps := Parse([]byte("volumes: []\n---\nsudo: true\n"), opts)
+	if len(ps) != 1 || !strings.Contains(ps[0].Msg, "second YAML document") {
+		t.Errorf("a second document: %+v", ps)
+	}
+	// A normal file, with comments and blank lines after the last key, is fine.
+	if _, ps := Parse([]byte("# top\nvolumes: []\n\n# trailing comment\n\n"), opts); len(ps) != 0 {
+		t.Errorf("%+v", ps)
+	}
+	if _, ps := Parse([]byte(""), opts); len(ps) != 0 {
+		t.Errorf("an empty file is a valid config: %+v", ps)
+	}
+}

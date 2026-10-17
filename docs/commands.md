@@ -57,6 +57,7 @@ aicatraz completion fish | source        # fish (or save to ~/.config/fish/compl
 
 | You see | Because | Do |
 |---|---|---|
+| `the file is not read from here on: this line is indented differently ...` | A line is indented less than the first key of the file, and YAML stops reading there: usually an example switched on by removing only the `#`, which leaves a space in front of the key. | Remove the space too, so every top-level key starts in column 1. |
 | `volume ...: ... does not exist` | A hidden path must exist at launch (otherwise the agent could create it). | Create the file or directory. |
 | The agent can't reach its service, `connection refused` everywhere | The jail has no network unless the config gives it one. | Add `network: open`, or rules (see [`network`](configuration.md#network)). |
 | `no approval terminal: ask rules will be denied` | Nobody can be asked. | Start with `aicatraz up`, or pass `--approval-tty`. |

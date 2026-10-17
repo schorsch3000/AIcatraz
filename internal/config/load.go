@@ -73,6 +73,19 @@ func Parse(data []byte, opts Options) (*Config, []Problem) {
 		return nil, []Problem{yamlProblem(err)}
 	}
 
+	// The YAML reader stops quietly at a line that is indented less than the
+	// first key of the file (a leading space on one example that was switched
+	// on, say) and ignores the rest. Whatever is left over is an error.
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err == nil {
+		return nil, []Problem{{Line: extra.Line, Msg: "a second YAML document starts here (a line with ---); only the first one is read, so move everything into one document"}}
+	} else if !errors.Is(err, io.EOF) {
+		p := yamlProblem(err)
+		p.Msg = "the file is not read from here on: this line is indented differently from the keys before it, so everything after them would be ignored. " +
+			"All top-level keys must start in the same column (column 1); if you switched an example on by removing the `#`, remove the space after it too"
+		return nil, []Problem{p}
+	}
+
 	v := &validator{root: &root, home: opts.Home, dir: opts.Dir}
 	v.validate(cfg)
 	sort.SliceStable(v.problems, func(i, j int) bool { return v.problems[i].Line < v.problems[j].Line })

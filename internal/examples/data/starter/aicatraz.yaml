@@ -8,7 +8,8 @@
 #   aicatraz claude           start Claude Code in the jail (also: opencode)
 #   aicatraz up               like run, as a session you can detach from (Ctrl-Y)
 #
-# Lines starting with `# key:` are examples: remove the `# ` to switch one on.
+# Lines starting with `# key:` are examples. To switch one on, remove the `# `: the
+# hash and the space after it, so that the key starts in the first column.
 
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║  PROJECT AND IMAGE                                                     ║
