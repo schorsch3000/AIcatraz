@@ -3,6 +3,7 @@
 package mux
 
 import (
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
@@ -345,5 +346,46 @@ func TestScreenHidesTheProgramsWindowTitle(t *testing.T) {
 	off.HideTitles = true
 	if got := out(off, "\x1b[3;40r\x1b[2J"); got != "\x1b[3;40r\x1b[2J" {
 		t.Errorf("no bar, no rewriting: %q", got)
+	}
+}
+
+func TestRandomTheme(t *testing.T) {
+	defer func(old func(int) int) { randomIndex = old }(randomIndex)
+
+	// Every theme can come up, and the result is that theme's colors.
+	for i, th := range Themes {
+		randomIndex = func(n int) int {
+			if n != len(Themes) {
+				t.Errorf("must draw from all %d themes, not %d", len(Themes), n)
+			}
+			return i
+		}
+		got, err := ResolveColors("random", "", "")
+		want, _ := ResolveColors(th.Name, "", "")
+		if err != nil || got != want {
+			t.Errorf("draw %d (%s): %+v %v, want %+v", i, th.Name, got, err, want)
+		}
+	}
+	// Case does not matter; a text color or background still overrides the draw.
+	randomIndex = func(n int) int { return 0 }
+	if got, _ := ResolveColors("RANDOM", "red", ""); got.FG != "31" || got.BG != "48;5;18" {
+		t.Errorf("fg override: %+v", got)
+	}
+	// It really is random: over many draws more than one theme shows up, and all are valid.
+	randomIndex = rand.IntN
+	seen := map[Colors]bool{}
+	for i := 0; i < 300; i++ {
+		c, err := ResolveColors("random", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[c] = true
+	}
+	if len(seen) < 5 {
+		t.Errorf("300 draws gave only %d different themes", len(seen))
+	}
+	// An unknown name still lists random among the choices.
+	if _, err := ResolveColors("nope", "", ""); err == nil || !strings.Contains(err.Error(), "random") {
+		t.Errorf("%v", err)
 	}
 }

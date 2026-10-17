@@ -196,7 +196,7 @@ bar:
   bg: "#102030"         # optional
 ```
 
-The look of the status bar of `aicatraz up` sessions in this project, to tell terminals apart at a glance. All three keys are optional. Colors are a name (`red`, `bright-blue`, `gray`), a number from 0 to 255, `#rrggbb`, or `default`. A flag overrides this, and this overrides the user's `AICATRAZ_BAR_*` variables, key by key. See [sessions.md](sessions.md#the-status-bar).
+The look of the status bar of `aicatraz up` sessions in this project, to tell terminals apart at a glance. All three keys are optional. `theme: random` takes a different named theme every time a session is attached. Colors are a name (`red`, `bright-blue`, `gray`), a number from 0 to 255, `#rrggbb`, or `default`. A flag overrides this, and this overrides the user's `AICATRAZ_BAR_*` variables, key by key. See [sessions.md](sessions.md#the-status-bar).
 
 ## `limits`
 

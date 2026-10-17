@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -120,12 +121,23 @@ func mustColors(theme, fg, bg string) Colors {
 	return c
 }
 
-// ResolveColors combines a theme name (empty: the default) with an optional
-// text color and background color, which override the theme's.
+// RandomTheme is the name that picks one of the themes at random each time
+// the bar is set up.
+const RandomTheme = "random"
+
+// randomIndex picks a number below n; tests replace it.
+var randomIndex = rand.IntN
+
+// ResolveColors combines a theme name (empty: the default; "random": one of
+// the others, picked now) with an optional text color and background color,
+// which override the theme's.
 func ResolveColors(theme, fg, bg string) (Colors, error) {
 	name := strings.ToLower(strings.TrimSpace(theme))
 	if name == "" {
 		name = DefaultTheme
+	}
+	if name == RandomTheme {
+		name = Themes[randomIndex(len(Themes))].Name
 	}
 	var t Theme
 	found := false
@@ -135,7 +147,7 @@ func ResolveColors(theme, fg, bg string) (Colors, error) {
 		}
 	}
 	if !found {
-		var names []string
+		names := []string{RandomTheme}
 		for _, c := range Themes {
 			names = append(names, c.Name)
 		}
@@ -239,7 +251,7 @@ func Preview(w io.Writer, width int, styled bool) {
 		}
 		fmt.Fprintf(w, "%s\n  %-12s fg %-8s bg %-8s %s1  %s\n\n", bar, t.Name, t.FG, t.BG, ratio, t.Note)
 	}
-	fmt.Fprint(w, `Pick one with --bar-theme <name>, or set the colors yourself with --bar-fg and
+	fmt.Fprint(w, `Pick one with --bar-theme <name> ("random" takes a different one every time), or set the colors yourself with --bar-fg and
 --bar-bg. A color is a name (red, bright-blue, gray), a number from 0 to 255,
 #rrggbb, or default (the terminal's own). Names and 0 to 15 follow your terminal's
 theme; 16 to 255 and #rrggbb are the same everywhere. To keep a choice, put it in

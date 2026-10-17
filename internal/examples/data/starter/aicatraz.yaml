@@ -178,6 +178,6 @@ sudo: false
 # `aicatraz bar-colors` shows the themes. A flag overrides this, and this overrides
 # your AICATRAZ_BAR_* variables.
 # bar:
-#   theme: brick                 # a name from `aicatraz bar-colors`
+#   theme: brick                 # a name from `aicatraz bar-colors`, or `random`
 #   fg: white                    # text color: a name, 0-255, #rrggbb or default
 #   bg: "#102030"                # background; fg and bg override the theme's

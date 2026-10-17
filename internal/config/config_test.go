@@ -595,6 +595,9 @@ func TestBarSection(t *testing.T) {
 		}
 		t.Errorf("%s: want an error containing %q, got %+v", yaml, want, ps)
 	}
+	if _, ps := Parse([]byte("bar: {theme: random}\n"), opts); len(ps) != 0 {
+		t.Errorf("random is a theme: %+v", ps)
+	}
 	check("bar: {theme: nope}", "bar theme")
 	check("bar: {fg: purple}", "color")
 	check("bar: {bg: 300}", "0 to 255")

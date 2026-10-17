@@ -105,7 +105,7 @@ func runCompletion(args []string, stdout, stderr io.Writer) int {
 }
 
 func themeNames() []string {
-	var n []string
+	n := []string{mux.RandomTheme}
 	for _, t := range mux.Themes {
 		n = append(n, t.Name)
 	}
