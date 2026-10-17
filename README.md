@@ -112,6 +112,8 @@ For prompts to appear while the agent works, start it with `aicatraz up --agent 
 | `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |
 | `aicatraz up [flags] [-- command...]` | Same, as a session that keeps running when you detach (`Ctrl-Y`, or `--detach-key ctrl-<key>` / `$AICATRAZ_DETACH_KEY`), and that shows approval prompts over the agent's screen. Attaches if it already runs. A status bar on the bottom row shows the project, what runs, how long, and the detach key (`--status-bar off`, colors: `--bar-theme`, `--bar-fg`, `--bar-bg`). `--tmux` uses a tmux session instead. |
 | `aicatraz down` | Stop the project's session (the jail shuts down). |
+| `aicatraz pins [-c file] list` | Show the files whose approved version is remembered, and whether each is still as approved (`ok`, `changed`, `missing`). |
+| `aicatraz pins [-c file] forget <path>... \| --missing \| --all` | Forget pins: the next time a rule runs them they need approval again. `--missing` drops pins of files that are gone. |
 | `aicatraz bar-colors` | Show the status bar in every color theme. |
 | `aicatraz shell [-- command...]` | Another shell in the running jail (a second terminal). Host commands use the same broker. |
 | `aicatraz claude` / `opencode` `[flags] [-- agent args...]` | Start that agent in the jail. Installed on first use. |

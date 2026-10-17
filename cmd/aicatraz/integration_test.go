@@ -730,6 +730,29 @@ make deploy-test; echo "rc3=$?"
 		t.Errorf("pinning once must be enough: %d prompts in total", n)
 	}
 
+	// `pins list` shows what was approved and how the file looks now; `pins forget` makes the next call ask again.
+	listed, _, lcode := p.aicatraz("pins", "list")
+	if lcode != 0 || !strings.Contains(listed, "Makefile") || !strings.HasPrefix(strings.Split(listed, "\n")[1], "ok") {
+		t.Errorf("pins list: exit %d\n%s", lcode, listed)
+	}
+	p.write("Makefile", "deploy-test:\n\t@echo changed-again\n")
+	if listed, _, _ = p.aicatraz("pins", "list"); !strings.Contains(listed, "changed") {
+		t.Errorf("pins list after an edit:\n%s", listed)
+	}
+	if out, _, c := p.aicatraz("pins", "forget", "Makefile"); c != 0 || !strings.Contains(out, "forgot") {
+		t.Errorf("pins forget: exit %d\n%s", c, out)
+	}
+	if listed, _, _ = p.aicatraz("pins", "list"); strings.Contains(listed, "Makefile") {
+		t.Errorf("a forgotten pin is still listed:\n%s", listed)
+	}
+	go term.answerWhenAsked(4, "n")
+	if _, _, c := p.runWithApproval(term.slave.Name(), "make", "deploy-test"); c != 126 {
+		t.Errorf("after forgetting, the call must ask (and was refused): exit %d", c)
+	}
+	if n := strings.Count(term.text(), "never approved before"); n < 2 {
+		t.Errorf("the forgotten file should show as never approved:\n%s", term.text())
+	}
+
 	// Another project with the identical Makefile pins independently.
 	q := newProject(t)
 	q.write("Makefile", "deploy-test:\n\t@echo deployed\n\t@echo extra\n")

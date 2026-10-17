@@ -153,6 +153,8 @@ rules:
 
 The host command runs as you, in the directory the agent was in (which must lie inside a mounted volume and not in a hidden path), with a freshly built environment: a small base set (`PATH` from the broker, `HOME`, `USER`, `LANG`, `TZ`, `TERM`) plus the rule's `env_pass`. The binary is found on the broker's `PATH`; one that lives in a writable volume is never used.
 
+`aicatraz pins list` shows what the project has approved and whether each file has changed since; `aicatraz pins forget <path>... | --missing | --all` takes pins away, so the next run asks again. Forgetting is always safe: it only makes things stricter.
+
 **`depends_on: auto`** knows these sets: `make` (`Makefile`, `GNUmakefile`, `*.mk`, and files named by `include`), `npm`/`npx`/`pnpm`/`yarn` (`package.json`, lockfiles, `.npmrc`), `git` (`.git/config`, `.git/hooks/*`, `.gitattributes`, `.gitmodules`), script interpreters (`python*`, `bash`, `sh`, `node`, `ruby`, `perl`, `php`: the script argument), `docker` (`Dockerfile*`, compose files). For other commands list the files yourself. Pins are kept per project, outside every mount; only your `p` answer ever updates one. More than 200 dependent files can't be pinned, so such a rule asks every time.
 
 **The linter** warns about: a rule that an earlier one already covers (never reached), `command: "*"` with `allow`, shells/interpreters/`env`/`xargs`/`ssh`/`find`/`sudo` allowed with unrestricted arguments, `allow` on `make`/`npm`/`git`/interpreters/`docker` without `depends_on`, secret-looking `env_pass` on a rule that runs without asking, `depends_on` or `env_pass` on a `local` or `deny` rule, `depends_on: auto` on a command without a built-in set.

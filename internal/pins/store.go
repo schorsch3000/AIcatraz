@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -174,6 +175,16 @@ func (s *Store) Forget(path string) error {
 		return err
 	}
 	return nil
+}
+
+// Approved returns when path was pinned (the pin file's modification time),
+// or the zero time if there is no pin.
+func (s *Store) Approved(path string) time.Time {
+	st, err := os.Stat(filepath.Join(s.dir, s.key(path)+".json"))
+	if err != nil {
+		return time.Time{}
+	}
+	return st.ModTime()
 }
 
 // Paths lists every pinned path, sorted.
