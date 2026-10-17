@@ -23,6 +23,7 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/broker"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/devices"
 	"github.com/schorsch3000/aicatraz/internal/mux"
 	"github.com/schorsch3000/aicatraz/internal/pins"
 	"github.com/schorsch3000/aicatraz/internal/ui"
@@ -156,6 +157,10 @@ func Launch(o Options) (int, error) {
 	if cfg.NetworkMode() == config.NetFiltered {
 		in.NetworkContainer = EgressName(id, os.Getpid())
 	}
+	scanner := devices.NewScanner()
+	if len(cfg.DeviceSpecs) > 0 {
+		in.DeviceRules = devices.CgroupRules(cfg.DeviceSpecs, scanner.Scan(cfg.DeviceSpecs))
+	}
 	var ag *agentRun
 	if o.Agent != "" {
 		if ag, err = planAgent(o, cfg, home, state, uid, gid, o.Print); err != nil {
@@ -257,6 +262,14 @@ func Launch(o Options) (int, error) {
 			return err
 		})
 		go w.run(stopWatch)
+	}
+	if len(cfg.DeviceSpecs) > 0 {
+		daudit, _ := broker.OpenAudit(filepath.Join(state, "audit.log"))
+		stopDevices := startDeviceWatcher(in, daudit, fmt.Sprintf("%s-%d", id, os.Getpid()), scanner)
+		defer func() {
+			stopDevices()
+			daudit.Close()
+		}()
 	}
 	started := time.Now()
 	code, err := runDocker(runArgs, o, in.Name)

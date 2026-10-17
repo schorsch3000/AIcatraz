@@ -154,3 +154,26 @@ func TestRunArgsPublishedPorts(t *testing.T) {
 		t.Errorf("options must come before the image: %v", side)
 	}
 }
+
+func TestRunArgsDeviceRules(t *testing.T) {
+	in := testInput(t, "devices: [{serial: 'usb-*'}]\nvolumes:\n  - ~/p:rw\n")
+	in.DeviceRules = []string{"c 166:* rwm", "c 189:* rwm"}
+	args, err := RunArgs(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has(args, "--device-cgroup-rule", "c 166:* rwm") || !has(args, "--device-cgroup-rule", "c 189:* rwm") {
+		t.Errorf("rules missing: %v", args)
+	}
+	if slices.Contains(args, "--device") || slices.Contains(args, "--privileged") {
+		t.Errorf("the jail gets rules, never a device or privileges: %v", args)
+	}
+	for _, c := range []string{"MKNOD", "SYS_ADMIN"} {
+		if slices.Contains(args, "--cap-add="+c) {
+			t.Errorf("%s must not be added", c)
+		}
+	}
+	if args, _ := RunArgs(testInput(t, "volumes:\n  - ~/p:rw\n")); slices.Contains(args, "--device-cgroup-rule") {
+		t.Error("no devices, no rules")
+	}
+}

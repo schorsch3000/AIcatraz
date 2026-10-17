@@ -9,6 +9,7 @@ volumes:    [ ... ]
 env:        { static: {...}, from_host: [...] }
 sudo:       false
 ports:      [ 3000, "8080:80" ]
+devices:    [ {serial: "usb-Arduino_*"}, {usb: "2e8a:*"}, {path: /dev/ttyUSB0} ]
 network:    off | open | { default: ask, dns: open, resolvers: [...], rules: [ ... ] }
 limits:     { pids: 1024, memory: 2g }
 approval:   { timeout: 2m }
@@ -164,6 +165,26 @@ Publishes ports of the jail on this machine, so that a browser (or anything else
 - It needs a network: with no `network` section, or `network: off`, the jail has none and `ports` is an error. With `network: open` the jail publishes the ports itself; with rules the helper container does, and incoming connections are not subject to the rules (only what the jail connects to is).
 - The server in the jail must listen on all addresses (`0.0.0.0`), not on `127.0.0.1`: a connection from outside arrives at the jail's own address, not at its loopback.
 - Anything published is reachable by every program and every user on this machine, and by every web page open in your browser. The agent can start a server there too, and it can answer a request from a page you visit. Publish what you mean to, on the narrowest address.
+
+## `devices`
+
+```yaml
+devices:
+  - serial: "usb-Arduino_*"     # a name under /dev/serial/by-id, * allowed
+  - usb: "2e8a:*"               # vendor:product, * allowed (here: every Raspberry Pi device)
+  - usb: "1a86:7523"            # a CH340 serial adapter ...
+    usb_serial: "A5069*"        # ... with this serial number
+  - path: /dev/ttyUSB0          # a fixed device node; a glob is allowed
+```
+
+Gives the jail USB serial adapters, Arduino, ESP and Pico boards: hardware that comes and goes. Exactly one of `serial`, `usb` and `path` per entry; `usb_serial` goes with `usb`. `aicatraz devices` lists the USB devices of this machine with the vendor:product, serial number and device nodes to write here, and marks the ones the config hands to the jail.
+
+- **What the jail gets:** the device nodes of the devices that match, at the same path as on the host (`/dev/ttyACM0`, `/dev/ttyUSB0`, `/dev/bus/usb/001/005` for tools that talk USB themselves), and the stable names under `/dev/serial/by-id/`. Use those: the number in `ttyACM0` changes between plug-ins. Nodes are owned by the jail user, mode 0660.
+- **Plug and unplug:** the launcher watches the host. A device that appears gets its nodes in the running jail within a fraction of a second (devices already plugged in at start appear moments after the jail starts); one that disappears has them removed; one that comes back, under whatever name the kernel gave it, gets them again. A program that had the port open sees the usual error and has to open it again.
+- **How:** the jail starts with device-cgroup rules for the classes `serial` and `usb` can match (ttyACM, ttyUSB, raw USB) and for the exact numbers of the nodes a `path` matches now. The nodes are made from outside by the launcher, with `docker exec --privileged` of our own binary, so it works on any image. The jail itself never gets `MKNOD` (not with `sudo: true` either), so a rule alone gives it nothing.
+- **Limits:** a device of another class (`path`) has to be plugged in when the jail starts, since its rule can't be added later. No block devices: the mass-storage drive of a Pico in BOOTSEL mode, or anything that needs to be mounted, doesn't work; neither does anything that needs more than access to the node. For those, run the tool on the host through a rule (for example `picotool load` or a `make flash` that is `allow` or `ask`).
+- **Not allowed:** the nodes that belong to the container (`/dev/null`, `/dev/pts/*`, ...) and `/dev/mem`, `/dev/kmem` and `/dev/port`. Not `path: /dev/*`.
+- Every attach and detach is in the audit log (`"event":"device"`). Nothing is printed while the session runs, because the launcher's output shares the terminal with the program in the jail.
 
 ## `limits`
 

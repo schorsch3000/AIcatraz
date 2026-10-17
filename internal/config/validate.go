@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/schorsch3000/aicatraz/internal/devices"
 	"github.com/schorsch3000/aicatraz/internal/egress"
 	"github.com/schorsch3000/aicatraz/internal/pins"
 )
@@ -83,6 +84,7 @@ func (v *validator) validate(c *Config) {
 	v.agent(c)
 	v.network(c)
 	v.ports(c)
+	v.devices(c)
 }
 
 func (v *validator) project(c *Config) {
@@ -473,5 +475,68 @@ func (v *validator) ports(c *Config) {
 			v.warnf(p, "%s is published on %s: other machines can connect to it, not only this one", spec, pm.HostIP)
 		}
 		c.PortMaps = append(c.PortMaps, pm)
+	}
+}
+
+var usbID = regexp.MustCompile(`^[0-9a-fA-F?*]{1,4}:[0-9a-fA-F?*]{1,4}$`)
+
+func (v *validator) devices(c *Config) {
+	for i, d := range c.Devices {
+		at := func(field string) []any { return []any{"devices", i, field} }
+		base := []any{"devices", i}
+
+		set := 0
+		for _, s := range []string{d.Serial, d.USB, d.Path} {
+			if s != "" {
+				set++
+			}
+		}
+		if set != 1 {
+			v.errorf(base, "a device needs exactly one of serial, usb and path")
+			continue
+		}
+		if d.USBSerial != "" && d.USB == "" {
+			v.errorf(at("usb_serial"), "usb_serial goes with usb")
+			continue
+		}
+		spec := devices.Spec{Serial: d.Serial, USB: strings.ToLower(d.USB), USBSerial: d.USBSerial, Path: d.Path}
+
+		switch {
+		case d.Serial != "":
+			if _, err := path.Match(d.Serial, ""); err != nil || strings.Contains(d.Serial, "/") {
+				v.errorf(at("serial"), "serial %q must be a name like usb-Arduino_*, as listed in /dev/serial/by-id", d.Serial)
+				continue
+			}
+		case d.USB != "":
+			if !usbID.MatchString(d.USB) {
+				v.errorf(at("usb"), "usb %q must be vendor:product in hex, such as 2341:0043 or 2e8a:* (see `aicatraz devices`)", d.USB)
+				continue
+			}
+			if _, err := path.Match(d.USBSerial, ""); err != nil {
+				v.errorf(at("usb_serial"), "bad pattern %q", d.USBSerial)
+				continue
+			}
+		default:
+			clean := path.Clean(d.Path)
+			switch {
+			case clean != d.Path || !strings.HasPrefix(d.Path, "/dev/"):
+				v.errorf(at("path"), "path %q must be a clean path under /dev", d.Path)
+				continue
+			case devices.Reserved(clean):
+				v.errorf(at("path"), "%s can't be given to the jail: it belongs to the container or is too dangerous", d.Path)
+				continue
+			case clean == "/dev/*" || clean == "/dev/**":
+				v.errorf(at("path"), "path %q matches every device; name the ones you mean", d.Path)
+				continue
+			}
+			if _, err := path.Match(d.Path, ""); err != nil {
+				v.errorf(at("path"), "bad pattern %q", d.Path)
+				continue
+			}
+			if strings.ContainsAny(d.Path, "*?[") {
+				v.warnf(at("path"), "%s can match more than one device; each one that is plugged in is given to the jail", d.Path)
+			}
+		}
+		c.DeviceSpecs = append(c.DeviceSpecs, spec)
 	}
 }

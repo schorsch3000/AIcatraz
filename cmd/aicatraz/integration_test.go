@@ -1887,3 +1887,47 @@ func TestPortsNeedANetwork(t *testing.T) {
 		t.Errorf("exit %d: %s", code, stderr)
 	}
 }
+
+// ---- devices ----
+
+func TestDeviceNodeIsMadeInTheJail(t *testing.T) {
+	if st, err := os.Stat("/dev/fuse"); err != nil || st.Mode()&os.ModeCharDevice == 0 {
+		t.Skip("no /dev/fuse on this machine")
+	}
+	p := newProject(t)
+	p.write("aicatraz.yaml", "devices:\n  - path: /dev/fuse\nvolumes:\n  - ~/p:rw\n")
+	script := `i=0; while [ ! -e /dev/fuse ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; ls -ln /dev/fuse; : < /dev/fuse && echo opened; ls /dev/mem 2>&1; id -u`
+	stdout, stderr, code := p.run("sh", "-c", script)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	owner := fmt.Sprintf("%d %d", os.Getuid(), os.Getgid())
+	if !strings.Contains(stdout, "crw-rw----") || !strings.Contains(stdout, owner) || !strings.Contains(stdout, "10, 229") || !strings.Contains(stdout, "opened") {
+		t.Errorf("the node must exist, be owned by the jail user and open:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "/dev/mem\n") && !strings.Contains(stdout, "No such file") {
+		t.Errorf("only the named device may appear:\n%s", stdout)
+	}
+
+	// Nodes of other devices can't be made by the jail itself.
+	out, _, _ := p.run("sh", "-c", "mknod /dev/mynull c 1 3 2>&1; echo rc=$?")
+	if strings.Contains(out, "rc=0") {
+		t.Errorf("the jail made a device node itself:\n%s", out)
+	}
+}
+
+func TestSerialPortsOfTheMachineAppearByTheirStableName(t *testing.T) {
+	entries, _ := os.ReadDir("/dev/serial/by-id")
+	if len(entries) == 0 {
+		t.Skip("no serial adapter plugged in")
+	}
+	p := newProject(t)
+	p.write("aicatraz.yaml", "devices:\n  - serial: '*'\nvolumes:\n  - ~/p:rw\n")
+	name := entries[0].Name()
+	// Only looked at, never opened: opening a serial port can reset the board behind it.
+	script := fmt.Sprintf(`i=0; while [ ! -L '/dev/serial/by-id/%s' ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; ls -l '/dev/serial/by-id/%s'; test -c "$(readlink '/dev/serial/by-id/%s')" && echo node-ok`, name, name, name)
+	stdout, stderr, code := p.run("sh", "-c", script)
+	if code != 0 || !strings.Contains(stdout, name) || !strings.Contains(stdout, "node-ok") {
+		t.Errorf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+}

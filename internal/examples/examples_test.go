@@ -82,7 +82,7 @@ func TestStarterCommentedOptionsAreValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys := regexp.MustCompile(`^# (project|image|env|limits|approval|canary|global|network|ports|rules|agent):`)
+	keys := regexp.MustCompile(`^# (project|image|env|limits|approval|canary|global|network|ports|devices|rules|agent):`)
 	// The image has two alternative forms: check each on its own.
 	for _, drop := range []func(string) bool{
 		func(l string) bool { return strings.HasPrefix(l, "image: debian") },
@@ -111,7 +111,7 @@ func TestStarterCommentedOptionsAreValid(t *testing.T) {
 			out = append(out, l)
 		}
 		text := strings.Join(out, "\n")
-		for _, key := range []string{"project:", "env:", "limits:", "approval:", "canary:", "global:", "network:", "ports:", "rules:", "agent:"} {
+		for _, key := range []string{"project:", "env:", "limits:", "approval:", "canary:", "global:", "network:", "ports:", "devices:", "rules:", "agent:"} {
 			if !strings.Contains("\n"+text, "\n"+key) {
 				t.Errorf("option %s is not documented in the starter config", key)
 			}

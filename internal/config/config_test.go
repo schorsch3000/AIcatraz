@@ -533,3 +533,46 @@ func TestPortsSection(t *testing.T) {
 		t.Errorf("same number on another protocol or address is no clash: %+v", ps)
 	}
 }
+
+func TestDevicesSection(t *testing.T) {
+	cfg, ps := Parse([]byte(`
+devices:
+  - serial: "usb-Arduino_*"
+  - usb: "2E8A:*"
+  - usb: "1a86:7523"
+    usb_serial: "ABC*"
+  - path: /dev/ttyUSB0
+`), opts)
+	if len(ps) != 0 || len(cfg.DeviceSpecs) != 4 {
+		t.Fatalf("%+v %+v", ps, cfg.DeviceSpecs)
+	}
+	if cfg.DeviceSpecs[0].Serial != "usb-Arduino_*" || cfg.DeviceSpecs[1].USB != "2e8a:*" || cfg.DeviceSpecs[2].USBSerial != "ABC*" || cfg.DeviceSpecs[3].Path != "/dev/ttyUSB0" {
+		t.Errorf("%+v", cfg.DeviceSpecs)
+	}
+	check := func(yaml, want string, sev Severity) {
+		t.Helper()
+		_, ps := Parse([]byte(yaml+"\n"), opts)
+		for _, p := range ps {
+			if p.Severity == sev && strings.Contains(p.Msg, want) {
+				return
+			}
+		}
+		t.Errorf("%s: want %v containing %q, got %+v", yaml, sev, want, ps)
+	}
+	check("devices: [{}]", "exactly one of", Error)
+	check("devices: [{serial: a, usb: '1:2'}]", "exactly one of", Error)
+	check("devices: [{usb_serial: x}]", "exactly one of", Error)
+	check("devices: [{path: /dev/x, usb_serial: x}]", "usb_serial goes with usb", Error)
+	check("devices: [{serial: a/b}]", "must be a name", Error)
+	check("devices: [{serial: '[a'}]", "must be a name", Error)
+	check("devices: [{usb: '2341'}]", "vendor:product", Error)
+	check("devices: [{usb: 'zzzz:0001'}]", "vendor:product", Error)
+	check("devices: [{usb: '12345:0001'}]", "vendor:product", Error)
+	check("devices: [{path: /etc/passwd}]", "under /dev", Error)
+	check("devices: [{path: /dev/../etc/x}]", "under /dev", Error)
+	check("devices: [{path: /dev/mem}]", "too dangerous", Error)
+	check("devices: [{path: /dev/null}]", "belongs to the container", Error)
+	check("devices: [{path: /dev/pts/1}]", "belongs to the container", Error)
+	check("devices: [{path: /dev/*}]", "every device", Error)
+	check("devices: [{path: '/dev/ttyUSB*'}]", "more than one device", Warning)
+}

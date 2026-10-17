@@ -73,6 +73,17 @@ network: off
 #   - 3000                       # http://127.0.0.1:3000 -> port 3000 in the jail
 #   - "8080:80"
 
+# Hardware to hand to the jail while it is plugged in: Arduino, ESP and Pico
+# boards, USB serial adapters. The jail gets the device nodes of the devices you
+# name, created when they appear and removed when they disappear, also after a
+# reset or a re-plug. `aicatraz devices` lists what is plugged in.
+# devices:
+#   - serial: "usb-Arduino_*"      # a name under /dev/serial/by-id, * allowed
+#   - usb: "2e8a:*"                # vendor:product (a Raspberry Pi Pico), * allowed
+#   - usb: "1a86:7523"             # a CH340 adapter ...
+#     usb_serial: "A5069*"         # ... with this serial number
+#   - path: /dev/ttyUSB0           # a fixed device node
+
 # How long an `ask` prompt waits before it counts as a deny (5s to 1h).
 # approval:
 #   timeout: 2m

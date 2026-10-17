@@ -64,6 +64,7 @@ var completionVerbs = []cverb{
 	{name: "sessions", desc: "list the agent sessions of this project", flags: []cflag{flagConfig}},
 	{name: "resume", desc: "continue an agent session", flags: append(append([]cflag{}, agentFlags...), flagPick)},
 	{name: "tools", desc: "manage the cached agent executables", flags: []cflag{flagFromHst}, first: []string{"list", "install", "update"}, later: "tool"},
+	{name: "devices", desc: "list USB devices and what the jail gets", flags: []cflag{flagConfig}},
 	{name: "network", desc: "show or change the network rules", flags: []cflag{flagConfig, {"", "ports", "value", "ports to allow or deny"}, {"", "all", "", "forget every remembered rule"}}, first: []string{"list", "allow", "deny", "forget"}},
 	{name: "pins", desc: "list or forget approved file versions", flags: []cflag{flagConfig, {"", "all", "", "forget every pin"}, {"", "missing", "", "forget pins of files that are gone"}}, first: []string{"list", "diff", "forget"}, later: "file"},
 	{name: "init", desc: "write a starter config or Dockerfile.az", flags: []cflag{

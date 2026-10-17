@@ -50,6 +50,8 @@ type RunInput struct {
 	// NetworkContainer is the sidecar whose network the jail joins ("" for the
 	// normal one). The jail then shares the sidecar's hostname and DNS too.
 	NetworkContainer string
+	// DeviceRules are the device-cgroup rules for the hardware the config names.
+	DeviceRules []string
 }
 
 func PasswdPath(stateDir string) string { return filepath.Join(stateDir, "passwd") }
@@ -163,6 +165,9 @@ func RunArgs(in RunInput) ([]string, error) {
 		"--mount", bind(GroupPath(in.StateDir), "/etc/group", true),
 	)
 
+	for _, r := range in.DeviceRules {
+		args = append(args, "--device-cgroup-rule", r)
+	}
 	args = append(args, in.ExtraArgs...)
 	args = append(args, "-w", in.Cwd, "--entrypoint", "", in.Image)
 	if len(in.Command) == 0 {

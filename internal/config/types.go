@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/schorsch3000/aicatraz/internal/devices"
 	"github.com/schorsch3000/aicatraz/internal/egress"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
@@ -28,6 +29,7 @@ type Config struct {
 	Agent    Agent     `yaml:"agent"`
 	Network  *Network  `yaml:"network"`
 	Ports    []string  `yaml:"ports"`
+	Devices  []Device  `yaml:"devices"`
 
 	// Sudo gives the user passwordless sudo in the jail (see docs/security.md
 	// for what that costs). Default off.
@@ -35,6 +37,8 @@ type Config struct {
 
 	// Resolved is filled in by validation: volumes with ~ expanded and the mode parsed.
 	Resolved []Volume `yaml:"-"`
+	// DeviceSpecs is filled in by validation: the devices, parsed.
+	DeviceSpecs []devices.Spec `yaml:"-"`
 	// PortMaps is filled in by validation: the published ports, parsed.
 	PortMaps []PortMap `yaml:"-"`
 	// NetRules is filled in by validation: the network rules, parsed.
@@ -354,4 +358,13 @@ func (f *FlexString) UnmarshalYAML(n *yaml.Node) error {
 		return nil
 	}
 	return fmt.Errorf("line %d: expected a value or a list of values", n.Line)
+}
+
+// Device names hardware to hand to the jail while it is plugged in. Exactly one
+// of serial, usb and path.
+type Device struct {
+	Serial    string `yaml:"serial"`     // a name under /dev/serial/by-id, * allowed: usb-Arduino_*
+	USB       string `yaml:"usb"`        // vendor:product in hex, * allowed: 2341:0043, 2e8a:*
+	USBSerial string `yaml:"usb_serial"` // with usb: the device's serial number, * allowed
+	Path      string `yaml:"path"`       // a device node under /dev, * allowed: /dev/ttyUSB*
 }

@@ -112,6 +112,7 @@ In a terminal, `aicatraz claude` (and `opencode`, `agent`, `resume`) runs the ag
 | `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |
 | `aicatraz up [flags] [-- command...]` | Same, as a session that keeps running when you detach (`Ctrl-Y`, or `--detach-key ctrl-<key>` / `$AICATRAZ_DETACH_KEY`), and that shows approval prompts over the agent's screen. Attaches if it already runs. A status bar on the bottom row shows the project, what runs, how long, and the detach key (`--status-bar off`, colors: `--bar-theme`, `--bar-fg`, `--bar-bg`). `--tmux` uses a tmux session instead. |
 | `aicatraz down` | Stop the project's session (the jail shuts down). |
+| `aicatraz devices [-c file]` | List the USB devices of this machine (vendor:product, serial number, device nodes) and which of them the config hands to the jail. |
 | `aicatraz network [-c file] list` | Show the network rules of the config and the ones remembered from prompts. |
 | `aicatraz network [-c file] allow\|deny <target> [--ports ...]` · `forget <number> \| --all` | Change the remembered network rules (also in a running session). |
 | `aicatraz pins [-c file] list` | Show the files whose approved version is remembered, and whether each is still as approved (`ok`, `changed`, `missing`). |
@@ -158,6 +159,18 @@ A project is identified by the real path of its config file; set `project.id` to
 - [docs/security.md](docs/security.md): threat model, what is enforced, known risks.
 - [idea-v2.md](idea-v2.md): the design in full, with the reasoning.
 - [milestones.md](milestones.md): how it was built.
+
+## Hardware: Arduino, ESP, Pico
+
+`devices:` hands USB serial adapters and boards to the jail, by stable name (`/dev/serial/by-id/...`), by vendor:product with an optional serial number, or by path. They appear in the jail when they are plugged in and disappear when they are unplugged, and come back after a reset or re-plug, whatever number the kernel gives them. `aicatraz devices` shows what is plugged in and the names to write.
+
+```yaml
+devices:
+  - serial: "usb-Arduino_*"
+  - usb: "1a86:7523"      # a CH340 adapter
+```
+
+The jail gets the device nodes only; things that need more, such as flashing a Pico in BOOTSEL mode (a mass-storage drive), run on the host through a rule. See [the reference](docs/configuration.md#devices) and [the risks](docs/security.md#devices).
 
 ## Limiting the network
 

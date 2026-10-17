@@ -76,6 +76,15 @@ With a `network` section, a helper container (the sidecar) owns the jail's netwo
 
 `ports:` opens a way *into* the jail. By default a port is published on 127.0.0.1 only, so other machines can't connect, but everything on this machine can: every local user, every program, and every web page in your browser (a page can send requests to `127.0.0.1`). A server the agent starts on a published port answers all of them. Publish only what you need, keep the address narrow (`0.0.0.0` makes it reachable from the network, and `config check` warns about it), and treat a published port as an interface the agent can use to reach your browser. Incoming connections are not checked by the `network` rules; those control what the jail connects to.
 
+## Devices
+
+`devices:` gives the jail control of hardware. A board on a serial port can be flashed, reset, read and written by anything in the jail, so a device you list is fully in the agent's hands: firmware that is wrong or hostile, anything connected to the board's pins, and whatever else the device does. List only what you mean to, by the narrowest name (a serial number with `usb_serial` rather than a whole vendor).
+
+- **What stays closed:** only nodes of devices that match are made. The jail can't make nodes itself (no `MKNOD`, even with `sudo: true`), and the device-cgroup rules only cover the classes you name. A rule for a class does not give access to a device that does not match: no node exists for it.
+- **Permissions on the host aren't checked.** Docker's daemon opens the door, as it does for `--device`; the host's `dialout` or udev rules are not consulted. Whoever can run `aicatraz` here can hand the jail any matching device.
+- **`docker exec --privileged`** is used for the launcher's own node commands: our binary, fixed operations, paths checked (under `/dev`, never the runtime's own nodes, links only under `/dev/serial/by-id`). It is not available to the jail.
+- A device is a USB device: it can be more than it says (a "serial adapter" that is a keyboard emulator, a board with its own network). Treat what you plug in as part of the trust you give.
+
 ## Reporting a problem
 
 This is early software with a test suite that includes an adversarial part (forged binary paths, escape sequences in arguments, symlink and `..` tricks, changed files during approval, exposed hidden paths). If you find a way around a guarantee above, please report it with the exact config and commands.

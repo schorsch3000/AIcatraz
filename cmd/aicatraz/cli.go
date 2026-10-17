@@ -19,6 +19,7 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/canary"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/devices"
 	"github.com/schorsch3000/aicatraz/internal/egress"
 	"github.com/schorsch3000/aicatraz/internal/jail"
 	"github.com/schorsch3000/aicatraz/internal/mux"
@@ -53,6 +54,8 @@ const usage = `usage:
   aicatraz sessions              list the agent sessions of this project
   aicatraz resume [flags] [id] [--pick]
                                  continue the latest (or the given) agent session
+  aicatraz devices [-c file]     list the USB devices of this machine, and which the config
+                                 hands to the jail
   aicatraz network [-c file] list
                                  show the network rules and the remembered ones
   aicatraz network [-c file] allow|deny <host|ip|cidr|*> [--ports 22,443,8000-8080|*]
@@ -95,6 +98,12 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		return canary.Run(args[1:], stdout)
 	case "init":
 		return runInit(args[1:], stdout, stderr)
+	case "devices":
+		if err := jail.Devices(args[1:], stdout, stderr); err != nil {
+			ui.Error(stderr, "%v", err)
+			return 2
+		}
+		return 0
 	case "network":
 		if err := jail.Network(args[1:], stdout, stderr); err != nil {
 			ui.Error(stderr, "%v", err)
@@ -142,6 +151,8 @@ func cli(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		return 2
+	case devices.NodeCommand: // runs inside the jail, to make or remove a device node
+		return devices.RunNodeCommand(args[1:], stderr)
 	case egress.SidecarCommand: // the network helper container
 		return egress.RunSidecar(args[1:], stderr)
 	case jail.MuxServeCommand: // the detached process behind `up`
