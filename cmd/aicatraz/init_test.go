@@ -95,3 +95,63 @@ func TestInitRefusesTheHomeDirectory(t *testing.T) {
 		t.Error("nothing may be written")
 	}
 }
+
+func TestBaseImage(t *testing.T) {
+	cases := []struct{ rel, want string }{
+		{"ID=debian\nVERSION_ID=\"13\"", "debian:13"},
+		{"ID=debian", "debian:testing"},
+		{"ID=ubuntu\nVERSION_ID=\"24.04\"", "ubuntu:24.04"},
+		{"ID=fedora\nVERSION_ID=41", "fedora:41"},
+		{"ID=alpine\nVERSION_ID=3.20.3", "alpine:3.20"},
+		{"ID=\"rocky\"\nVERSION_ID=\"9.4\"", "rockylinux:9"},
+		{"ID=\"almalinux\"\nVERSION_ID=\"9.4\"", "almalinux:9"},
+		{"ID=\"centos\"\nVERSION_ID=\"9\"", "quay.io/centos/centos:stream9"},
+		{"ID=\"rhel\"\nVERSION_ID=\"9.4\"", "registry.access.redhat.com/ubi9/ubi"},
+		{"ID=arch", "archlinux:latest"},
+		{"ID=opensuse-leap\nVERSION_ID=\"15.6\"", "opensuse/leap:15.6"},
+		{"ID=opensuse-tumbleweed\nVERSION_ID=\"20250101\"", "opensuse/tumbleweed:latest"},
+		{"ID=amzn\nVERSION_ID=\"2023\"", "amazonlinux:2023"},
+		{"ID=linuxmint\nID_LIKE=\"ubuntu debian\"\nUBUNTU_CODENAME=noble", "ubuntu:noble"},
+		{"ID=raspbian\nID_LIKE=debian", "debian:stable"},
+	}
+	for _, c := range cases {
+		got, _, ok := baseImage(parseOsRelease(strings.NewReader(c.rel)))
+		if !ok || got != c.want {
+			t.Errorf("%q: got %q (ok=%v), want %q", c.rel, got, ok, c.want)
+		}
+	}
+	if _, _, ok := baseImage(parseOsRelease(strings.NewReader("ID=plan9"))); ok {
+		t.Error("unknown distribution should not match")
+	}
+}
+
+func TestInitDockerfile(t *testing.T) {
+	dir, _ := inDir(t)
+	rel := filepath.Join(t.TempDir(), "os-release")
+	os.WriteFile(rel, []byte("NAME=\"Debian GNU/Linux\"\nID=debian\nVERSION_ID=\"13\"\n"), 0o644)
+	old := osReleasePath
+	osReleasePath = rel
+	defer func() { osReleasePath = old }()
+
+	var out, errb bytes.Buffer
+	if code := cli([]string{"init", "dockerfile"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "Dockerfile.az"))
+	if string(b) != "FROM debian:13\n" {
+		t.Errorf("Dockerfile.az = %q", b)
+	}
+
+	// No silent overwrite.
+	os.WriteFile("Dockerfile.az", []byte("mine\n"), 0o644)
+	errb.Reset()
+	if code := cli([]string{"init", "dockerfile"}, &out, &errb); code != 1 {
+		t.Errorf("existing file: exit %d", code)
+	}
+	if b, _ := os.ReadFile("Dockerfile.az"); string(b) != "mine\n" {
+		t.Errorf("file was overwritten: %q", b)
+	}
+	if code := cli([]string{"init", "dockerfile", "--force"}, &out, &errb); code != 0 {
+		t.Errorf("--force: exit %d", code)
+	}
+}

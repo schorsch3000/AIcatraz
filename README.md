@@ -106,6 +106,7 @@ For prompts to appear while the agent works, start it with `aicatraz up --agent 
 | Command | What it does |
 |---|---|
 | `aicatraz init [--example name] [--list] [--force]` | Write a starter `aicatraz.yaml` (and `Dockerfile.az`) into this directory. Never overwrites without `--force`. |
+| `aicatraz init dockerfile [--force]` | Write a one-line `Dockerfile.az` (`FROM debian:13`, `FROM ubuntu:24.04`, ...) matching the distribution this machine runs. Knows Debian, Ubuntu, Fedora, Alpine, Rocky, AlmaLinux, CentOS Stream, RHEL, Arch, openSUSE, Amazon Linux and their Ubuntu and Debian derivatives. Never overwrites without `--force`. |
 | `aicatraz config check [file]` | Validate a config; warn about rules that are valid but risky. |
 | `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |
 | `aicatraz up [flags] [-- command...]` | Same, inside a tmux session (`aicatraz-<project>`), so approval prompts pop up. Attaches if it already runs. |

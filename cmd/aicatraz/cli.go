@@ -43,6 +43,9 @@ const usage = `usage:
                                  manage the cached agent executables
   aicatraz init [--example name] [--list] [--force]
                                  write a starter ` + defaultConfig + ` (and Dockerfile.az) here
+  aicatraz init dockerfile [--force]
+                                 write a one-line Dockerfile.az (FROM the distribution
+                                 this machine runs)
   aicatraz config check [file]   validate a config (default: ` + defaultConfig + `)
   aicatraz version
 `
