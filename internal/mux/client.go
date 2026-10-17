@@ -296,8 +296,17 @@ func (c *client) startOverlay(payload []byte) {
 	// region reset homes the cursor, and would otherwise be what is saved.
 	c.out.WriteString("\x1b[?1049h\x1b[r\x1b[2J\x1b[H\x1b[?25l") // the prompt gets the whole screen
 	go func() {
-		ans, err := approve.PromptKeys(ctx, o.keySource(), c.out, req, timeout, true)
-		text := ans.String()
+		var text string
+		var err error
+		if req.Kind == approve.KindNetwork {
+			var reply approve.Reply
+			reply, err = approve.PromptNet(ctx, o.keySource(), c.out, req, timeout, true)
+			text = reply.Encode()
+		} else {
+			var ans approve.Answer
+			ans, err = approve.PromptKeys(ctx, o.keySource(), c.out, req, timeout, true)
+			text = ans.String()
+		}
 		switch {
 		case ctx.Err() != nil:
 			text = "" // withdrawn: nobody to tell

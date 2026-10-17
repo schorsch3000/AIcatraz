@@ -328,3 +328,101 @@ func TestSudoOption(t *testing.T) {
 		t.Error("sudo: maybe must be rejected")
 	}
 }
+
+func TestNetworkSection(t *testing.T) {
+	cfg, ps := Parse([]byte(`
+network:
+  default: deny
+  dns: restricted
+  resolvers: [1.1.1.1, 9.9.9.9]
+  rules:
+    - to: api.anthropic.com
+      decision: allow
+    - to: "*.github.com"
+      ports: [22, 443, 8000-8080]
+      decision: allow
+    - to: 10.20.0.0/16
+      ports: "5432, 5433"
+      proto: [tcp, udp]
+      decision: allow
+    - to: 1.1.1.1
+      ports: 53
+      proto: udp
+      decision: allow
+    - to: 8.8.8.8
+      proto: icmp
+      decision: allow
+    - to: "*"
+      ports: "*"
+      decision: ask
+`), opts)
+	if len(ps) != 0 {
+		t.Fatalf("problems: %+v", ps)
+	}
+	n := cfg.Network
+	if n == nil || n.DefaultOrAsk() != "deny" || n.DNS != "restricted" || len(n.Resolvers) != 2 || len(cfg.NetRules) != 6 {
+		t.Fatalf("network: %+v rules %d", n, len(cfg.NetRules))
+	}
+	r := cfg.NetRules
+	if r[1].Ports.String() != "22, 443, 8000-8080" || r[2].Ports.String() != "5432-5433" || r[3].Ports.String() != "53" || !r[5].Ports.IsAny() {
+		t.Errorf("ports: %v | %v | %v", r[1].Ports, r[2].Ports, r[3].Ports)
+	}
+	if !r[3].AppliesTo("udp") || r[3].AppliesTo("tcp") || !r[4].AppliesTo("icmp") || r[0].AppliesTo("udp") {
+		t.Error("protocols")
+	}
+
+	cfg, ps = Parse([]byte("network: {}\n"), opts)
+	if len(ps) != 0 || cfg.Network == nil || cfg.Network.DefaultOrAsk() != "ask" {
+		t.Errorf("an empty network section means ask: %+v %v", cfg.Network, ps)
+	}
+	cfg, _ = Parse([]byte("volumes: []\n"), opts)
+	if cfg.Network != nil {
+		t.Error("no section: the network is open")
+	}
+}
+
+func TestNetworkSectionErrors(t *testing.T) {
+	for yaml, want := range map[string]string{
+		"network: {default: maybe}":                                              "unknown default",
+		"network: {dns: closed}":                                                 "unknown dns mode",
+		`network: {resolvers: ["::1"]}`:                                          "not an IPv4",
+		"network: {rules: [{decision: allow}]}":                                  "needs `to`",
+		"network: {rules: [{to: example.com}]}":                                  "needs a decision",
+		"network: {rules: [{to: example.com, decision: maybe}]}":                 "unknown decision",
+		"network: {rules: [{to: '::1', decision: allow}]}":                       "IPv6",
+		"network: {rules: [{to: 'a b', decision: allow}]}":                       "not a host name",
+		"network: {rules: [{to: example.com, ports: '99999', decision: allow}]}": "bad port",
+		"network: {rules: [{to: example.com, ports: 'x', decision: allow}]}":     "bad port",
+		"network: {rules: [{to: example.com, proto: sctp, decision: allow}]}":    "unknown protocol",
+		"network: {rules: [{to: example.com, proto: udp, decision: allow}]}":     "need an IP address",
+		"network: {rules: [{to: '*', proto: icmp, decision: allow}]}":            "need an IP address",
+	} {
+		_, ps := Parse([]byte(yaml+"\n"), opts)
+		found := false
+		for _, p := range ps {
+			found = found || p.Severity == Error && strings.Contains(p.Msg, want)
+		}
+		if !found {
+			t.Errorf("%s: want an error containing %q, got %+v", yaml, want, ps)
+		}
+	}
+	for yaml, want := range map[string]string{
+		"network: {rules: [{to: 1.2.3.4, proto: udp, decision: ask}]}":               "ask works for TCP only",
+		"network: {rules: [{to: 0.0.0.0/0, decision: allow}]}":                       "connect anywhere",
+		"network: {rules: [{to: '*', decision: allow}]}":                             "connect anywhere",
+		"network: {rules: [{to: 1.2.3.4, proto: icmp, ports: 80, decision: allow}]}": "mean nothing for icmp",
+	} {
+		_, ps := Parse([]byte(yaml+"\n"), opts)
+		found := false
+		for _, p := range ps {
+			found = found || p.Severity == Warning && strings.Contains(p.Msg, want)
+		}
+		if !found || HasErrors(ps) {
+			t.Errorf("%s: want a warning containing %q, got %+v", yaml, want, ps)
+		}
+	}
+	// `*` on a port list is not "anywhere".
+	if _, ps := Parse([]byte("network: {rules: [{to: '*', ports: 443, decision: allow}]}\n"), opts); len(ps) != 0 {
+		t.Errorf("%+v", ps)
+	}
+}

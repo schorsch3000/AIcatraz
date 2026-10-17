@@ -17,6 +17,7 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/approve"
 	"github.com/schorsch3000/aicatraz/internal/canary"
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/egress"
 	"github.com/schorsch3000/aicatraz/internal/jail"
 	"github.com/schorsch3000/aicatraz/internal/mux"
 	"github.com/schorsch3000/aicatraz/internal/ui"
@@ -48,6 +49,11 @@ const usage = `usage:
   aicatraz sessions              list the agent sessions of this project
   aicatraz resume [flags] [id] [--pick]
                                  continue the latest (or the given) agent session
+  aicatraz network [-c file] list
+                                 show the network rules and the remembered ones
+  aicatraz network [-c file] allow|deny <host|ip|cidr|*> [--ports 22,443,8000-8080|*]
+  aicatraz network [-c file] forget <number> | --all
+                                 change the remembered rules (also in a running session)
   aicatraz pins [-c file] list   show the files whose approved version is remembered
   aicatraz pins [-c file] forget <path>... | --missing | --all
                                  forget pins; the next run asks again
@@ -83,6 +89,12 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		return canary.Run(args[1:], stdout)
 	case "init":
 		return runInit(args[1:], stdout, stderr)
+	case "network":
+		if err := jail.Network(args[1:], stdout, stderr); err != nil {
+			ui.Error(stderr, "%v", err)
+			return 2
+		}
+		return 0
 	case "pins":
 		if err := jail.Pins(args[1:], stdout, stderr); err != nil {
 			ui.Error(stderr, "%v", err)
@@ -124,6 +136,8 @@ func cli(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		return 2
+	case egress.SidecarCommand: // the network helper container
+		return egress.RunSidecar(args[1:], stderr)
 	case jail.MuxServeCommand: // the detached process behind `up`
 		code, err := jail.ServeMux(args[1:])
 		if err != nil {

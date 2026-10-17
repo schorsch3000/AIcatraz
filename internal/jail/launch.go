@@ -151,6 +151,9 @@ func Launch(o Options) (int, error) {
 		SocketPath: filepath.Join(runDir, "broker.sock"),
 		ImagePath:  imagePath("docker", img.Ref),
 	}
+	if cfg.Network != nil {
+		in.NetworkContainer = EgressName(id, os.Getpid())
+	}
 	var ag *agentRun
 	if o.Agent != "" {
 		if ag, err = planAgent(o, cfg, home, state, uid, gid, o.Print); err != nil {
@@ -169,6 +172,10 @@ func Launch(o Options) (int, error) {
 		}
 		if cfg.Sudo {
 			fmt.Fprintf(o.Stdout, "# then, from %s: a layer with sudo and a sudoers entry for uid %d, tagged %s\n", baseRef, uid, img.Ref)
+		}
+		if cfg.Network != nil {
+			fmt.Fprintf(o.Stdout, "# network rules: the sidecar below owns the jail's network; every connection is checked against the rules\n")
+			fmt.Fprintln(o.Stdout, shellLine("docker", egressRunArgs(in.NetworkContainer, id, os.Getpid(), self, "<run dir>/egress.sock", "<run dir>/egress.nft", cfg.Network.Resolvers)))
 		}
 		fmt.Fprintln(o.Stdout, shellLine("docker", runArgs))
 		return 0, nil
@@ -222,11 +229,19 @@ func Launch(o Options) (int, error) {
 		}
 		w = newWatcher(in.Name, hideIsDir, cfg.Canary.ActionOrDefault(), cfg.Canary.IntervalOrDefault(), b, o.Stderr)
 	}
-	b, stop, err := startBroker(cfg, state, runBase, runDir, id, uid, store, chooseApprover(cfg, o, runDir), o.Stderr, hook)
+	approver := chooseApprover(cfg, o, runDir)
+	b, stop, err := startBroker(cfg, state, runBase, runDir, id, uid, store, approver, o.Stderr, hook)
 	if err != nil {
 		return 0, err
 	}
 	defer stop()
+	if cfg.Network != nil {
+		eg, err := startEgress(cfg, id, state, runDir, approver, self, o.Stderr)
+		if err != nil {
+			return 0, err
+		}
+		defer eg.stop()
+	}
 	stopWatch := make(chan struct{})
 	if w != nil {
 		b.SetCanary(func() error {

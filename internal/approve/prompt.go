@@ -38,6 +38,22 @@ func Prompt(ctx context.Context, in *os.File, out io.Writer, req Request, timeou
 	return PromptKeys(ctx, fdKeys(in), out, req, timeout, raw)
 }
 
+// PromptNetFile is PromptNet on a terminal file: it is put in raw mode, and
+// anything typed before the prompt appeared is discarded.
+func PromptNetFile(ctx context.Context, in *os.File, out io.Writer, req Request, timeout time.Duration) (Reply, error) {
+	raw := term.IsTerminal(int(in.Fd()))
+	if raw {
+		old, err := term.MakeRaw(int(in.Fd()))
+		if err == nil {
+			defer term.Restore(int(in.Fd()), old)
+		} else {
+			raw = false
+		}
+		_ = unix.IoctlSetInt(int(in.Fd()), unix.TCFLSH, unix.TCIFLUSH)
+	}
+	return PromptNet(ctx, fdKeys(in), out, req, timeout, raw)
+}
+
 // KeySource returns the next key of the person answering. It returns
 // io.EOF when nobody is there any more, ErrTimeout once deadline has passed
 // and ctx.Err() if ctx ends first.

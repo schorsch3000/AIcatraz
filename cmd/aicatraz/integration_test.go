@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1486,5 +1487,241 @@ func TestUpSession(t *testing.T) {
 	tm2.wait(15 * time.Second)
 	if out, _ := exec.Command("docker", "ps", "-q", "--filter", "label=aicatraz.project=it-up").Output(); len(bytes.TrimSpace(out)) != 0 {
 		t.Error("the jail still runs after down")
+	}
+}
+
+// ---- network rules ----
+
+// bridgeGateway is the address the sidecar reaches this host at.
+func bridgeGateway(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("docker", "network", "inspect", "bridge", "-f", "{{(index .IPAM.Config 0).Gateway}}").Output()
+	gw := strings.TrimSpace(string(out))
+	if err != nil || gw == "" {
+		t.Skip("cannot find the docker bridge gateway")
+	}
+	return gw
+}
+
+// hello starts a server that says "hello-<port>" and closes; it returns the port.
+func hello(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	port := l.Addr().(*net.TCPAddr).Port
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			fmt.Fprintf(c, "hello-%d\n", port)
+			c.Close()
+		}
+	}()
+	return port
+}
+
+// fetch is the jail-side script: connect, read a line.
+func fetch(gw string, port int) string {
+	return fmt.Sprintf(`l=; exec 3<>/dev/tcp/%s/%d 2>/dev/null && read -t 8 l <&3; echo "port%d=[$l]"; exec 3>&-;`, gw, port, port)
+}
+
+func egressContainers(t *testing.T) []string {
+	out, _ := exec.Command("docker", "ps", "-a", "--filter", "label=aicatraz.egress=1", "--format", "{{.Names}}").Output()
+	return strings.Fields(string(out))
+}
+
+func TestNetworkRulesAllowAndRefuse(t *testing.T) {
+	gw := bridgeGateway(t)
+	open, closed := hello(t), hello(t)
+	p := newProject(t)
+	p.write("aicatraz.yaml", fmt.Sprintf(`
+project: {id: it-net}
+volumes:
+  - ~/p:rw
+network:
+  default: deny
+  rules:
+    - {to: %s, ports: "%d", decision: allow}
+`, gw, open))
+	before := len(egressContainers(t))
+
+	script := fetch(gw, open) + fetch(gw, closed) + fmt.Sprintf(`printf x >/dev/udp/%s/53 2>/dev/null || echo udp-blocked;`, gw) +
+		`grep -c . /etc/resolv.conf >/dev/null; grep -h nameserver /etc/resolv.conf;`
+	stdout, stderr, code := p.run("bash", "-c", script)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, fmt.Sprintf("port%d=[hello-%d]", open, open)) {
+		t.Errorf("the allowed port must work:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, fmt.Sprintf("port%d=[]", closed)) {
+		t.Errorf("a port no rule allows must give nothing:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "udp-blocked") {
+		t.Errorf("udp must be blocked:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "nameserver 127.0.0.1") {
+		t.Errorf("the jail must use the helper's resolver:\n%s", stdout)
+	}
+	if len(egressContainers(t)) != before {
+		t.Errorf("the sidecar must be gone after the session: %v", egressContainers(t))
+	}
+
+	// Both decisions are in the audit log.
+	logs, _ := filepath.Glob(filepath.Join(p.stateDir(), "*", "audit.log"))
+	if len(logs) != 1 {
+		t.Fatalf("audit logs: %v", logs)
+	}
+	data, _ := os.ReadFile(logs[0])
+	if !strings.Contains(string(data), `"event":"net"`) || !strings.Contains(string(data), fmt.Sprintf("%s:%d", gw, closed)) ||
+		!strings.Contains(string(data), `"decision":"deny"`) || !strings.Contains(string(data), `"decision":"allow"`) {
+		t.Errorf("the audit log lacks the network decisions:\n%s", data)
+	}
+}
+
+func TestNetworkAskAnsweredOnTheApprovalTerminal(t *testing.T) {
+	gw := bridgeGateway(t)
+	first, second := hello(t), hello(t)
+	p := newProject(t)
+	p.write("aicatraz.yaml", "project: {id: it-netask}\nvolumes:\n  - ~/p:rw\nnetwork:\n  rules:\n    - {to: 203.0.113.0/24, decision: deny}\napproval:\n  timeout: 30s\n")
+	term := newApprovalTerminal(t)
+
+	// The first connection is allowed once (y), the second is refused (n),
+	// the third is allowed for the session (s) and the fourth then needs no answer.
+	go func() {
+		term.answerWhenAsked(1, "y")
+		term.answerWhenAsked(2, "n")
+		term.answerWhenAsked(3, "s")
+	}()
+	script := fetch(gw, first) + fetch(gw, second) + fetch(gw, first) + fetch(gw, first)
+	stdout, stderr, code := p.runWithApproval(term.slave.Name(), "bash", "-c", script)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	want := []string{
+		fmt.Sprintf("port%d=[hello-%d]", first, first), // y
+		fmt.Sprintf("port%d=[]", second),               // n
+	}
+	for _, w := range want {
+		if !strings.Contains(stdout, w) {
+			t.Errorf("missing %q:\n%s", w, stdout)
+		}
+	}
+	if n := strings.Count(stdout, fmt.Sprintf("port%d=[hello-%d]", first, first)); n != 3 {
+		t.Errorf("the first port should have worked three times (y, s, then without asking), got %d:\n%s", n, stdout)
+	}
+	shown := term.text()
+	if n := strings.Count(shown, "OUT OF THE JAIL"); n != 3 {
+		t.Errorf("expected 3 questions, saw %d:\n%s", n, shown)
+	}
+	for _, w := range []string{fmt.Sprintf("%s:%d", gw, first), "[e]", "allow this connection once", "only a rule naming the address"} {
+		if !strings.Contains(shown, w) {
+			t.Errorf("the prompt lacks %q:\n%s", w, shown)
+		}
+	}
+}
+
+func TestNetworkRememberedRuleAndTheNetworkCommand(t *testing.T) {
+	gw := bridgeGateway(t)
+	port := hello(t)
+	p := newProject(t)
+	p.write("aicatraz.yaml", "project: {id: it-netmem}\nvolumes:\n  - ~/p:rw\nnetwork: {}\napproval:\n  timeout: 30s\n")
+	term := newApprovalTerminal(t)
+
+	// Edit the ports to a range around the real one, then remember.
+	go term.answerWhenAsked(1, portEdit(port))
+	stdout, stderr, code := p.runWithApproval(term.slave.Name(), "bash", "-c", fetch(gw, port))
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("port%d=[hello-%d]", port, port)) {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+
+	// A new session, nobody to ask: the remembered rule decides.
+	stdout, stderr, code = p.run("bash", "-c", fetch(gw, port))
+	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("port%d=[hello-%d]", port, port)) {
+		t.Fatalf("the remembered rule must apply in a new session: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+
+	// `network list` shows it, `network forget` takes it away.
+	out, _, c := p.aicatraz("network", "list")
+	if c != 0 || !strings.Contains(out, gw) || !strings.Contains(out, fmt.Sprintf("%d-%d", port-1, port+1)) {
+		t.Errorf("network list: exit %d\n%s", c, out)
+	}
+	if _, _, c := p.aicatraz("network", "forget", "1"); c != 0 {
+		t.Errorf("network forget: exit %d", c)
+	}
+	stdout, _, _ = p.run("bash", "-c", fetch(gw, port))
+	if !strings.Contains(stdout, fmt.Sprintf("port%d=[]", port)) {
+		t.Errorf("after forgetting, nobody to ask means refused:\n%s", stdout)
+	}
+}
+
+// portEdit types keys that replace the prefilled port by the range
+// port-1 to port+1 (the prefilled text is the port itself) and remember.
+func portEdit(port int) string {
+	return "e" + strings.Repeat("\x7f", len(fmt.Sprint(port))) + fmt.Sprintf("%d-%d\rp", port-1, port+1)
+}
+
+func TestNetworkNamesGoThroughTheHelperResolver(t *testing.T) {
+	if out, err := exec.Command("getent", "hosts", "example.com").Output(); err != nil || len(out) == 0 {
+		t.Skip("no DNS from this machine")
+	}
+	p := newProject(t)
+	p.write("aicatraz.yaml", `
+project: {id: it-netnames}
+volumes:
+  - ~/p:rw
+network:
+  default: deny
+  rules:
+    - {to: example.org, decision: deny}
+    - {to: example.com, ports: 80, decision: allow}
+`)
+	script := `
+getent hosts example.com >/dev/null && echo resolved-allowed
+getent hosts example.org >/dev/null || echo refused-denied-name
+exec 3<>/dev/tcp/example.com/80 && printf 'HEAD / HTTP/1.0\r\nHost: example.com\r\n\r\n' >&3 && read -t 10 l <&3 && echo "http: $l"
+l=; exec 4<>/dev/tcp/example.com/443 2>/dev/null && { printf x >&4; read -t 5 l <&4; echo "port443=[$l]"; }
+`
+	stdout, stderr, code := p.run("bash", "-c", script)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	for _, w := range []string{"resolved-allowed", "refused-denied-name", "http: HTTP/1.", "port443=[]"} {
+		if !strings.Contains(stdout, w) {
+			t.Errorf("missing %q:\n%s", w, stdout)
+		}
+	}
+}
+
+func TestNetworkPrintShowsTheSidecar(t *testing.T) {
+	p := newProject(t)
+	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\nnetwork: {resolvers: [9.9.9.9]}\n")
+	out, _, code := p.aicatraz("run", "--print", "--", "true")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var side, jailLine string
+	for _, l := range lines {
+		switch {
+		case strings.Contains(l, "--label aicatraz.egress=1"):
+			side = l
+		case strings.HasPrefix(l, "docker run") && strings.Contains(l, "--network container:"):
+			jailLine = l
+		}
+	}
+	if side == "" || jailLine == "" {
+		t.Fatalf("both containers must be shown:\n%s", out)
+	}
+	if !strings.Contains(side, "--cap-add=NET_ADMIN") || strings.Contains(jailLine, "NET_ADMIN") || !strings.Contains(jailLine, "--cap-drop=ALL") {
+		t.Errorf("only the sidecar gets NET_ADMIN:\nsidecar: %s\njail: %s", side, jailLine)
+	}
+	if strings.Contains(jailLine, "--hostname") || !strings.Contains(side, "--hostname") || !strings.Contains(side, "disable_ipv6=1") || !strings.HasSuffix(side, "9.9.9.9") {
+		t.Errorf("hostname, ipv6 and resolvers:\n%s\n%s", side, jailLine)
 	}
 }

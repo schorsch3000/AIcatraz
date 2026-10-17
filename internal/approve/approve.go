@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -70,12 +71,26 @@ type Request struct {
 	Files []FileChange `json:"files,omitempty"`
 	// CanPin offers "run and remember these files as approved".
 	CanPin bool `json:"can_pin,omitempty"`
-	// Kind is "" for a host command, or KindBuild for an image build.
+	// Kind is "" for a host command, KindBuild for an image build, or
+	// KindNetwork for a connection the jail wants to make.
 	Kind string `json:"kind,omitempty"`
+	// Net describes a KindNetwork request.
+	Net *NetInfo `json:"net,omitempty"`
 }
 
-// KindBuild marks a request to build the project's image.
-const KindBuild = "build"
+const (
+	// KindBuild marks a request to build the project's image.
+	KindBuild = "build"
+	// KindNetwork marks a request to let the jail connect somewhere.
+	KindNetwork = "network"
+)
+
+// NetInfo is the connection of a KindNetwork request.
+type NetInfo struct {
+	IP    string   `json:"ip"`
+	Port  int      `json:"port"`
+	Names []string `json:"names,omitempty"` // what the jail resolved to this address
+}
 
 // FileChange describes one dependent file that needs attention.
 type FileChange struct {
@@ -90,6 +105,12 @@ type FileChange struct {
 // after timeout. Implementations show one prompt at a time.
 type Approver interface {
 	Ask(ctx context.Context, req Request, timeout time.Duration) (Answer, error)
+}
+
+// NetApprover is an Approver that can also answer a network request, with the
+// richer Reply: what to allow, and for how long.
+type NetApprover interface {
+	AskNet(ctx context.Context, req Request, timeout time.Duration) (Reply, error)
 }
 
 const (
@@ -181,6 +202,27 @@ func RenderStyled(r Request, st ui.Style) string {
 		fmt.Fprintf(&b, "  %s %s\n", st.Dim(fmt.Sprintf("%-8s", label)), value)
 	}
 
+	if r.Kind == KindNetwork && r.Net != nil {
+		b.WriteString("\n  " + st.Bold(ui.Prog+": the jail wants to make a connection ") + st.BoldYellow("OUT OF THE JAIL") + "\n\n")
+		ip := r.Net.IP
+		if _, err := netip.ParseAddr(ip); err != nil {
+			ip = Quote(ip) // not an address: show it escaped
+		}
+		line("to", st.Bold(fmt.Sprintf("%s:%d", ip, r.Net.Port)))
+		if len(r.Net.Names) > 0 {
+			quoted := make([]string, len(r.Net.Names))
+			for i, n := range r.Net.Names {
+				quoted[i] = Quote(n)
+			}
+			line("name", strings.Join(quoted, ", "))
+		} else {
+			line("name", st.Dim("none: the jail did not look this address up"))
+		}
+		for _, w := range r.Warnings {
+			b.WriteString("\n  " + st.BoldYellow("!! "+Quote(w)) + "\n")
+		}
+		return b.String()
+	}
 	if r.Kind == KindBuild {
 		b.WriteString("\n  " + st.Bold(ui.Prog+": the project's build files need approval before the image is built") + "\n\n")
 		line("build", st.Bold(QuoteArgs(r.Name, r.Args)))

@@ -44,7 +44,7 @@ Everything the container sends is a *request*: command name, arguments, working 
 4. **Credentials are copied in.** For agents, your credentials file is copied into the jail's state on every launch, so everything in the jail can read it. Hooks and MCP servers in your agent settings run inside the jail.
 5. **Hidden files are only as safe as the mount.** A hidden file is `/dev/null` bind-mounted over it. If the host replaces it by rename, it is exposed; the canary notices (within its interval, or at the next host command) and stops the session by default, but in that window the agent could have read it. Hide a directory instead of a single file.
 6. **Symlinks in rw volumes** are harmless inside the jail (it can't resolve them outside its mounts), but can mislead host-side tools. `confine_paths` resolves arguments to real paths, and the working directory is always resolved.
-7. **Open network** is intentional.
+7. **Open network** is the default. With a `network` section the jail is limited as described below, and whatever that section cannot see (see its limits) stays open.
 8. **The broker is one process per session.** If it dies, the shim fails clearly instead of hanging, and nothing runs on the host. A broker that was killed hard leaves a socket directory behind, cleaned up on the next start.
 9. **`local` is not a boundary.** It runs the jail's binary in the jail; it only decides *where*, never what the agent may do inside.
 
@@ -56,6 +56,21 @@ Everything the container sends is a *request*: command name, arguments, working 
 - **What is lost:** `no-new-privileges` and the read-only root filesystem (the container is removed on exit, so the writable layer doesn't survive), and the capability set is no longer empty. Anything that relies on the agent being unable to become root inside the container, such as a rule that trusts files the agent can only write with root rights, no longer holds.
 - **Files created as root** in a read-write volume stay owned by root on your machine (`sudo npm install` in the project, for example). You may need to `sudo chown` them back.
 - It is still a container: an escape needs a kernel or Docker bug, as before, but the extra capabilities widen the surface somewhat.
+
+## Network rules
+
+With a `network` section, a helper container (the sidecar) owns the jail's network namespace and the jail joins it. The jail keeps `--cap-drop=ALL`, so it has neither `NET_ADMIN` (which changes firewall rules) nor `NET_RAW`, and `sudo: true` doesn't add them. The sidecar has `NET_ADMIN` and `NET_BIND_SERVICE` and nothing else, runs our own binary, and talks to the host over a socket in the private run directory that is not mounted into the jail.
+
+- **What is enforced:** the firewall rejects everything the rules do not allow, over every protocol, IPv6 included (switched off). Every TCP connection goes through a proxy that asks the host; UDP and ICMP are allowed only by an address rule. The proxy and the DNS forwarder carry a socket mark that the firewall lets out, and the jail can't set one.
+- **Private and special addresses** can be allowed only by an IP or CIDR rule, never by a host name or `*`; a name that resolves to one (DNS rebinding) stays refused.
+- **Fail closed:** if the host process dies the sidecar exits, and the firewall stays in the jail's namespace with nothing listening, so connections fail.
+- **Limits:**
+  - The decision is by destination address and port. A rule for a name allows the addresses the jail's own lookup of that name returned; a CDN address shared with other sites is allowed for all of them.
+  - TLS isn't inspected, so the allowed destination is trusted with whatever is sent to it. An allowed host that relays (a proxy, a paste site, a git host the agent can push to) is a way out.
+  - DNS: with `dns: open` any name resolves and an attacker-chosen name can carry data in the query; `dns: restricted` closes that.
+  - The jail sees a TCP connection as open until the first read or write, because the proxy accepts it before the decision falls.
+  - Host commands you allow through `rules` run on the host's network, outside all of this.
+  - It is only as strong as Docker's isolation: a kernel bug is still a way out.
 
 ## Reporting a problem
 

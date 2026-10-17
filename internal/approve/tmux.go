@@ -31,6 +31,24 @@ type Tmux struct {
 const PromptCommand = "__approve"
 
 func (t *Tmux) Ask(ctx context.Context, req Request, timeout time.Duration) (Answer, error) {
+	text, err := t.popup(ctx, req, timeout)
+	if err != nil {
+		return Deny, err
+	}
+	return ParseAnswer(text), nil
+}
+
+// AskNet shows a network request in the popup.
+func (t *Tmux) AskNet(ctx context.Context, req Request, timeout time.Duration) (Reply, error) {
+	text, err := t.popup(ctx, req, timeout)
+	if err != nil {
+		return Reply{Verb: VerbDeny}, err
+	}
+	return ParseReply(text), nil
+}
+
+// popup runs the prompt in a popup and returns what it wrote as the answer.
+func (t *Tmux) popup(ctx context.Context, req Request, timeout time.Duration) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.seq++
@@ -41,35 +59,39 @@ func (t *Tmux) Ask(ctx context.Context, req Request, timeout time.Duration) (Ans
 
 	data, err := json.Marshal(req)
 	if err != nil {
-		return Deny, err
+		return "", err
 	}
 	if err := os.WriteFile(reqFile, data, 0o600); err != nil {
-		return Deny, err
+		return "", err
 	}
 
+	title := " aicatraz: approve a host command "
+	if req.Kind == KindNetwork {
+		title = " aicatraz: the jail wants to connect "
+	}
 	inner := shellJoin(t.Self, PromptCommand, reqFile, ansFile, strconv.Itoa(int(timeout.Seconds())))
 	cmd := exec.CommandContext(ctx, t.Tmux, "display-popup",
 		"-t", t.Pane, "-E", "-w", "90%", "-h", "70%", "-b", "rounded",
-		"-T", " aicatraz: approve a host command ", "exec "+inner)
+		"-T", title, "exec "+inner)
 	cmd.WaitDelay = time.Second
 	out, runErr := cmd.CombinedOutput()
 
 	if ctx.Err() != nil {
 		// The agent gave up or the broker is closing: take the popup away.
 		_ = exec.Command(t.Tmux, "display-popup", "-C", "-t", t.Pane).Run()
-		return Deny, ctx.Err()
+		return "", ctx.Err()
 	}
 	ans, readErr := os.ReadFile(ansFile)
 	if readErr != nil {
 		if runErr != nil {
-			return Deny, fmt.Errorf("%w: tmux: %v: %s", ErrUnavailable, runErr, strings.TrimSpace(string(out)))
+			return "", fmt.Errorf("%w: tmux: %v: %s", ErrUnavailable, runErr, strings.TrimSpace(string(out)))
 		}
-		return Deny, nil // popup closed without an answer
+		return "deny", nil // popup closed without an answer
 	}
 	if strings.TrimSpace(string(ans)) == "timeout" {
-		return Deny, ErrTimeout
+		return "", ErrTimeout
 	}
-	return ParseAnswer(string(ans)), nil
+	return string(ans), nil
 }
 
 // RunPrompt is the body of the popup: read the request, ask on the popup's own
@@ -85,10 +107,19 @@ func RunPrompt(reqFile, ansFile string, timeout time.Duration) int {
 		fmt.Fprintln(os.Stderr, "aicatraz:", err)
 		return 2
 	}
-	ans, err := Prompt(context.Background(), os.Stdin, os.Stdout, req, timeout)
-	result := ans.String()
-	if err == ErrTimeout {
-		result = "timeout"
+	var result string
+	if req.Kind == KindNetwork {
+		reply, err := PromptNetFile(context.Background(), os.Stdin, os.Stdout, req, timeout)
+		result = reply.Encode()
+		if err == ErrTimeout {
+			result = "timeout"
+		}
+	} else {
+		ans, err := Prompt(context.Background(), os.Stdin, os.Stdout, req, timeout)
+		result = ans.String()
+		if err == ErrTimeout {
+			result = "timeout"
+		}
 	}
 	if err := os.WriteFile(ansFile, []byte(result), 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, "aicatraz:", err)

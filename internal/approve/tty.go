@@ -27,3 +27,15 @@ func (t *TTY) Ask(ctx context.Context, req Request, timeout time.Duration) (Answ
 	defer f.Close()
 	return Prompt(ctx, f, f, req, timeout)
 }
+
+// AskNet shows a network request on the terminal.
+func (t *TTY) AskNet(ctx context.Context, req Request, timeout time.Duration) (Reply, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	f, err := os.OpenFile(t.Path, os.O_RDWR|syscallNoCtty, 0)
+	if err != nil {
+		return Reply{Verb: VerbDeny}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	defer f.Close()
+	return PromptNetFile(ctx, f, f, req, timeout)
+}

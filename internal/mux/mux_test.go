@@ -338,3 +338,29 @@ func TestParseKey(t *testing.T) {
 		t.Errorf("key %+v", k)
 	}
 }
+
+func TestNetworkPromptThroughTheSession(t *testing.T) {
+	s := startSession(t, `while read l; do echo "typed:$l"; done`)
+	tm := attach(t, s)
+	ap := &Approver{Sock: filepath.Join(s.dir, ApproveSock)}
+	got := make(chan approve.Reply, 1)
+	go func() {
+		r, _ := ap.AskNet(context.Background(), approve.Request{Kind: approve.KindNetwork,
+			Net: &approve.NetInfo{IP: "140.82.121.4", Port: 22, Names: []string{"github.com"}}}, 30*time.Second)
+		got <- r
+	}()
+	tm.expect("OUT OF THE JAIL")
+	tm.expect("github.com")
+	time.Sleep(armDelay + 200*time.Millisecond)
+	tm.type_("e, 443\rp") // edit the ports, then remember
+	r := <-got
+	if r.Verb != approve.VerbRemember || r.Ports != "22, 443" || r.Target != "github.com" {
+		t.Errorf("reply %+v", r)
+	}
+	tm.type_("after\r")
+	tm.expect("typed:after")
+	if strings.Contains(tm.screen(), "typed:e") || strings.Contains(tm.screen(), "typed:p") {
+		t.Error("keys for the prompt reached the program")
+	}
+	s.stop()
+}

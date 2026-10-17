@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/schorsch3000/aicatraz/internal/egress"
 	"github.com/schorsch3000/aicatraz/internal/pins"
 )
 
@@ -77,6 +79,7 @@ func (v *validator) validate(c *Config) {
 	v.rules(c)
 	v.lint(c)
 	v.agent(c)
+	v.network(c)
 }
 
 func (v *validator) project(c *Config) {
@@ -346,4 +349,92 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func (v *validator) network(c *Config) {
+	n := c.Network
+	if n == nil {
+		return
+	}
+	switch n.Default {
+	case "", "ask", "deny":
+	default:
+		v.errorf([]any{"network", "default"}, "unknown default %q (use ask or deny)", n.Default)
+	}
+	switch n.DNS {
+	case "", "open", "restricted":
+	default:
+		v.errorf([]any{"network", "dns"}, "unknown dns mode %q (use open or restricted)", n.DNS)
+	}
+	for i, r := range n.Resolvers {
+		if a, err := netip.ParseAddr(r); err != nil || !a.Is4() {
+			v.errorf([]any{"network", "resolvers", i}, "resolver %q is not an IPv4 address", r)
+		}
+	}
+
+	for i, r := range n.Rules {
+		at := func(field string) []any { return []any{"network", "rules", i, field} }
+		rule := egress.Rule{Decision: egress.Decision(r.Decision)}
+		bad := false
+
+		tg, err := egress.ParseTarget(r.To)
+		if err != nil {
+			if r.To == "" {
+				v.errorf([]any{"network", "rules", i}, "rule needs `to`: a host name, *.domain, an IP address, a CIDR range or *")
+			} else {
+				v.errorf(at("to"), "%v", err)
+			}
+			bad = true
+		}
+		rule.Target = tg
+
+		switch r.Decision {
+		case "allow", "ask", "deny":
+		case "":
+			v.errorf([]any{"network", "rules", i}, "rule needs a decision (allow, ask, deny)")
+			bad = true
+		default:
+			v.errorf(at("decision"), "unknown decision %q (use allow, ask or deny)", r.Decision)
+			bad = true
+		}
+
+		if r.Ports != "" {
+			if rule.Ports, err = egress.ParsePorts(string(r.Ports)); err != nil {
+				v.errorf(at("ports"), "%v", err)
+				bad = true
+			}
+		}
+		if r.Proto != "" {
+			if rule.Protos, err = egress.ParseProtos([]string{string(r.Proto)}); err != nil {
+				v.errorf(at("proto"), "%v", err)
+				bad = true
+			}
+		}
+		if bad {
+			continue
+		}
+
+		for _, p := range rule.Protos {
+			if p != egress.TCP && !rule.Target.IsAddress() {
+				v.errorf(at("proto"), "%s rules need an IP address or CIDR range as `to`: only TCP knows the names (and * means any TCP destination)", p)
+			}
+			if p == egress.ICMP && !rule.Ports.IsEmpty() {
+				v.warnf(at("ports"), "ports mean nothing for icmp")
+			}
+		}
+		if rule.Decision == egress.Ask && (rule.AppliesTo(egress.UDP) || rule.AppliesTo(egress.ICMP)) && rule.Target.IsAddress() {
+			v.warnf(at("decision"), "ask works for TCP only: for udp and icmp this rule counts as deny")
+		}
+		if rule.Decision == egress.Allow && rule.Target.IsAddress() && rule.Target.Prefix().Bits() == 0 {
+			v.warnf(at("to"), "allowing 0.0.0.0/0 lets the jail connect anywhere; the network section then limits nothing")
+		}
+		if rule.Decision == egress.Allow && rule.Target.IsAny() && rule.Ports.IsEmpty() {
+			v.warnf(at("to"), "allowing * on every port lets the jail connect anywhere public; the network section then limits nothing")
+		}
+		if rule.Target.IsAddress() && !egress.IsSpecial(rule.Target.Prefix().Addr()) && rule.Decision == egress.Allow &&
+			rule.Target.Prefix().Bits() < 8 && rule.Target.Prefix().Bits() > 0 {
+			v.warnf(at("to"), "%s is a very large range", rule.Target)
+		}
+		c.NetRules = append(c.NetRules, rule)
+	}
 }

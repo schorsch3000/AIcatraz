@@ -45,6 +45,9 @@ type RunInput struct {
 	ImagePath  string          // the image's own PATH ("" if it has none)
 	ExtraArgs  []string        // more docker flags (an agent's mounts and environment)
 	ExtraPath  []string        // directories added to PATH after the shim directory
+	// NetworkContainer is the sidecar whose network the jail joins ("" for the
+	// normal one). The jail then shares the sidecar's hostname and DNS too.
+	NetworkContainer string
 }
 
 func PasswdPath(stateDir string) string { return filepath.Join(stateDir, "passwd") }
@@ -63,9 +66,13 @@ func RunArgs(in RunInput) ([]string, error) {
 	if in.TTY {
 		args = append(args, "-t")
 	}
+	args = append(args, "--name", in.Name)
+	if in.NetworkContainer != "" {
+		args = append(args, "--network", "container:"+in.NetworkContainer)
+	} else {
+		args = append(args, "--hostname", hostname(in.ID))
+	}
 	args = append(args,
-		"--name", in.Name,
-		"--hostname", hostname(in.ID),
 		"--label", "aicatraz.project="+in.ID,
 		"--user", fmt.Sprintf("%d:%d", in.UID, in.GID),
 		"--cap-drop=ALL",

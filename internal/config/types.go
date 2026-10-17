@@ -3,10 +3,12 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/schorsch3000/aicatraz/internal/egress"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
@@ -22,6 +24,7 @@ type Config struct {
 	Global   Global    `yaml:"global"`
 	Rules    []Rule    `yaml:"rules"`
 	Agent    Agent     `yaml:"agent"`
+	Network  *Network  `yaml:"network"`
 
 	// Sudo gives the user passwordless sudo in the jail (see docs/security.md
 	// for what that costs). Default off.
@@ -29,6 +32,8 @@ type Config struct {
 
 	// Resolved is filled in by validation: volumes with ~ expanded and the mode parsed.
 	Resolved []Volume `yaml:"-"`
+	// NetRules is filled in by validation: the network rules, parsed.
+	NetRules []egress.Rule `yaml:"-"`
 }
 
 type Project struct {
@@ -219,4 +224,53 @@ func (p Problem) FormatStyled(file string, st ui.Style) string {
 		loc = fmt.Sprintf("%s:%d", file, p.Line)
 	}
 	return fmt.Sprintf("%s: %s: %s", st.Bold(loc), label, p.Msg)
+}
+
+// Network limits what the jail may connect to. Without this section the
+// network is open.
+type Network struct {
+	Default   string    `yaml:"default"`   // what a connection no rule covers does: ask (default) or deny
+	DNS       string    `yaml:"dns"`       // open (default): names resolve unless a rule refuses them; restricted: only names a rule covers
+	Resolvers []string  `yaml:"resolvers"` // upstream DNS servers (default: the host's)
+	Rules     []NetRule `yaml:"rules"`
+}
+
+// DefaultOrAsk is the decision for connections no rule covers.
+func (n *Network) DefaultOrAsk() egress.Decision {
+	if n.Default == "deny" {
+		return egress.Deny
+	}
+	return egress.Ask
+}
+
+// NetRule is one line of the network policy.
+type NetRule struct {
+	To       string     `yaml:"to"`
+	Ports    FlexString `yaml:"ports"`
+	Proto    FlexString `yaml:"proto"`
+	Decision string     `yaml:"decision"`
+}
+
+// FlexString is a value written either as one string (`ports: "80, 443"`,
+// `ports: 443`, `ports: "*"`) or as a list (`ports: [80, 443, 8000-8080]`);
+// a list is joined with commas.
+type FlexString string
+
+func (f *FlexString) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		*f = FlexString(n.Value)
+		return nil
+	case yaml.SequenceNode:
+		var parts []string
+		for _, c := range n.Content {
+			if c.Kind != yaml.ScalarNode {
+				return fmt.Errorf("line %d: expected a value or a list of values", c.Line)
+			}
+			parts = append(parts, c.Value)
+		}
+		*f = FlexString(strings.Join(parts, ","))
+		return nil
+	}
+	return fmt.Errorf("line %d: expected a value or a list of values", n.Line)
 }

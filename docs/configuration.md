@@ -8,6 +8,7 @@ image:      ...
 volumes:    [ ... ]
 env:        { static: {...}, from_host: [...] }
 sudo:       false
+network:    { default: ask, dns: open, resolvers: [...], rules: [ ... ] }
 limits:     { pids: 1024, memory: 2g }
 approval:   { timeout: 2m }
 canary:     { action: stop, interval: 3s }
@@ -91,6 +92,60 @@ Gives the jail user passwordless `sudo`. **This loosens the jail, read [the risk
 2. **sudo is installed if the image doesn't have it.** Before the first start, aicatraz builds a small layer on top of your image (tagged `aicatraz/<project>:sudo`) that installs sudo and adds the sudoers entry. It knows how to install sudo on Debian, Ubuntu, Fedora, Alpine, Rocky, AlmaLinux, CentOS Stream, RHEL, Arch, openSUSE, Amazon Linux and their derivatives. For any other image it stops with an error: install sudo in your `Dockerfile.az` yourself, and aicatraz still adds the sudoers entry. An image without a shell can't be used.
 
 To make sudo work, the container runs differently: `no-new-privileges` is off, the root filesystem is writable (changes are thrown away when the container exits), and ten capabilities are kept instead of none (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`, `SETUID`, `SETGID`, `SETFCAP`, `KILL`, `AUDIT_WRITE`, `SYS_CHROOT`). Everything else stays dropped.
+
+## `network`
+
+```yaml
+network:
+  default: ask               # what a connection no rule covers does: ask (default) or deny
+  dns: open                  # open (default) or restricted
+  resolvers: [1.1.1.1]       # DNS servers the helper uses (default: this machine's)
+  rules:
+    - {to: api.anthropic.com, ports: 443, decision: allow}
+    - {to: "*.github.com", ports: [22, 443], decision: allow}
+    - {to: 10.20.0.0/16, ports: "5432, 5433", decision: allow}
+    - {to: 1.1.1.1, ports: 53, proto: udp, decision: allow}
+```
+
+Without a `network` section the jail's network is open. With one, everything that leaves the jail is checked, over every protocol. **Needs Docker and a one-time build of a small helper image (`aicatraz/egress:1`, Debian with nftables; it needs network access once).**
+
+| Key | Meaning |
+|---|---|
+| `default` | For a connection no rule covers: `ask` (the human is asked, see below) or `deny`. |
+| `dns` | `open`: the jail resolves every name except those a `deny` rule names. `restricted`: only names an `allow` or `ask` rule covers. With `open` a name you never mentioned can still carry data out inside a DNS query, as it can anywhere; use `restricted` to stop that. |
+| `resolvers` | IPv4 addresses of the DNS servers to use. Default: the ones in this machine's `/etc/resolv.conf` (loopback stubs can't be used from a container, so name real ones if that is all you have). |
+| `rules` | Checked top to bottom; the first rule that matches decides. |
+
+**A rule**
+
+| Key | |
+|---|---|
+| `to` | A host name (`api.example.com`), a pattern for subdomains (`*.example.com`, which does not include `example.com` itself), one IPv4 address, a CIDR range (`10.0.0.0/8`), or `*` for any destination. IPv6 is switched off in the jail. |
+| `ports` | A list (`22, 80, 443`), a range (`1000-2000`), any mix (`22, 80, 443, 8000-8080`), or `*`. Written as a string or as a YAML list. Default: any port. |
+| `proto` | `tcp`, `udp`, `icmp`, or a list. Default: `tcp` for a name or `*`, `tcp` and `udp` for an address. `udp` and `icmp` need an IP address or CIDR range as `to`. |
+| `decision` | `allow`, `ask` or `deny`. `ask` works for TCP only. |
+
+**How it is enforced.** A helper container (the sidecar) owns the jail's network. Its firewall rejects everything that is not allowed, and sends every TCP connection to a transparent proxy that asks the host; the jail has no network capability and can't change any of it. What the jail resolves goes through the helper's DNS server, which remembers which names resolved to which addresses, so a connection to an address can be judged, and shown to you, by name. A name rule allows an address only if the jail's own lookup of that name returned it. TCP goes through the proxy even when a rule allows it, so the jail sees a connection "open" before the decision falls; a refused one is reset on first use. UDP and ICMP are never asked about: they are rejected unless an address rule allows them.
+
+**Private addresses.** Loopback, the private ranges (10/8, 172.16/12, 192.168/16), link-local (which includes the cloud metadata address 169.254.169.254), the shared range 100.64/10 and multicast can be allowed only by a rule that names an IP address or CIDR range. A host name, or `*`, never allows them, so DNS rebinding can't point an allowed name at your local network. Your own machine as seen from the jail (the Docker bridge address) is such an address.
+
+**Asking.** A connection no rule covers (with `default: ask`) shows a prompt, in the `aicatraz up` overlay, a tmux popup or on `--approval-tty`, with the address, the name the jail looked up (if any), and these answers:
+
+| Key | |
+|---|---|
+| `y` | Let this connection through; nothing is remembered. |
+| `s` | Allow the target on the ports for this session. |
+| `p` | Allow it and remember it (see below). |
+| `x` | Block the target on the ports for this session. |
+| `e` | Edit the ports. They start as the port of the connection and can be a list, a range, a mix, or `*`: `22, 80, 443, 8000-8080`. |
+| `t` | Pick another target for `s`, `p` and `x`: each name the jail looked up, or the address. |
+| `n`, Enter, Esc | Deny. No answer before the approval timeout is a deny. |
+
+Questions come one at a time; the next one sees the answer to the one before, so a burst of connections to one destination asks once. Without anybody to ask (no `up`, no `--approval-tty`), such connections are refused.
+
+**Remembered rules** go to `network.json` in the project's state directory, after the rules of the config (a `deny` in the config always wins), and are picked up by running sessions. `aicatraz network list` shows both kinds, `aicatraz network forget <number> | --all` removes remembered ones, and `aicatraz network allow|deny <target> [--ports ...]` adds one without a prompt.
+
+Every decision is in the audit log (`"event":"net"`).
 
 ## `limits`
 

@@ -456,7 +456,11 @@ func (s *server) answer(c *clientConn, id uint32, text string) {
 	valid := s.client == c && p != nil && p.id == id
 	s.mu.Unlock()
 	if valid {
-		s.finish(p, approve.ParseAnswer(text).String(), false)
+		if p.req.Kind == approve.KindNetwork {
+			s.finish(p, approve.ParseReply(text).Encode(), false)
+		} else {
+			s.finish(p, approve.ParseAnswer(text).String(), false)
+		}
 	}
 }
 
@@ -482,18 +486,36 @@ type Approver struct {
 }
 
 func (a *Approver) Ask(ctx context.Context, req approve.Request, timeout time.Duration) (approve.Answer, error) {
+	text, err := a.ask(ctx, req, timeout)
+	if err != nil {
+		return approve.Deny, err
+	}
+	return approve.ParseAnswer(text), nil
+}
+
+// AskNet shows a network request to whoever is attached.
+func (a *Approver) AskNet(ctx context.Context, req approve.Request, timeout time.Duration) (approve.Reply, error) {
+	text, err := a.ask(ctx, req, timeout)
+	if err != nil {
+		return approve.Reply{Verb: approve.VerbDeny}, err
+	}
+	return approve.ParseReply(text), nil
+}
+
+// ask sends the request and returns the text of the answer.
+func (a *Approver) ask(ctx context.Context, req approve.Request, timeout time.Duration) (string, error) {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", a.Sock)
 	if err != nil {
-		return approve.Deny, approve.ErrUnavailable
+		return "", approve.ErrUnavailable
 	}
 	defer conn.Close()
 	body, err := json.Marshal(request{Request: req, TimeoutS: timeout.Seconds()})
 	if err != nil {
-		return approve.Deny, err
+		return "", err
 	}
 	if _, err := conn.Write(append(body, '\n')); err != nil {
-		return approve.Deny, approve.ErrUnavailable
+		return "", approve.ErrUnavailable
 	}
 
 	type result struct {
@@ -511,14 +533,14 @@ func (a *Approver) Ask(ctx context.Context, req approve.Request, timeout time.Du
 	}()
 	select {
 	case <-ctx.Done():
-		return approve.Deny, ctx.Err() // closing the connection withdraws the prompt
+		return "", ctx.Err() // closing the connection withdraws the prompt
 	case r := <-res:
 		switch {
 		case r.err != nil:
-			return approve.Deny, approve.ErrUnavailable
+			return "", approve.ErrUnavailable
 		case r.ans == "timeout":
-			return approve.Deny, approve.ErrTimeout
+			return "", approve.ErrTimeout
 		}
-		return approve.ParseAnswer(r.ans), nil
+		return r.ans, nil
 	}
 }

@@ -43,6 +43,24 @@ volumes:
 # a writable root filesystem and some capabilities. See docs/security.md.
 sudo: false
 
+# Limit what the jail may connect to. Without this section the network is open.
+# Every TCP connection is checked against the rules; one no rule covers is asked
+# about (default: ask) or refused (default: deny). UDP and ping are rejected unless
+# a rule for an IP address allows them. Rules are checked top to bottom, the first
+# match wins. Needs a one-time build of a small helper image (network access).
+#   to      a host name, *.domain, an IPv4 address, a CIDR range, or *
+#   ports   22, 443, 8000-8080 and so on, or * (default: any port)
+#   proto   tcp (the default for names), udp, icmp (for addresses only)
+# network:
+#   default: ask                  # or deny
+#   dns: open                     # or restricted: only names a rule covers resolve
+#   resolvers: [1.1.1.1]          # default: this machine's
+#   rules:
+#     - {to: api.anthropic.com, ports: 443, decision: allow}
+#     - {to: "*.github.com", ports: [22, 443], decision: allow}
+#     - {to: 10.20.0.0/16, ports: "5432, 5433", decision: allow}
+#     - {to: 1.1.1.1, ports: 53, proto: udp, decision: allow}
+
 # How long an `ask` prompt waits before it counts as a deny (5s to 1h).
 # approval:
 #   timeout: 2m

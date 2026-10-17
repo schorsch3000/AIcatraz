@@ -112,6 +112,8 @@ For prompts to appear while the agent works, start it with `aicatraz up --agent 
 | `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |
 | `aicatraz up [flags] [-- command...]` | Same, as a session that keeps running when you detach (`Ctrl-Y`, or `--detach-key ctrl-<key>` / `$AICATRAZ_DETACH_KEY`), and that shows approval prompts over the agent's screen. Attaches if it already runs. A status bar on the bottom row shows the project, what runs, how long, and the detach key (`--status-bar off`, colors: `--bar-theme`, `--bar-fg`, `--bar-bg`). `--tmux` uses a tmux session instead. |
 | `aicatraz down` | Stop the project's session (the jail shuts down). |
+| `aicatraz network [-c file] list` | Show the network rules of the config and the ones remembered from prompts. |
+| `aicatraz network [-c file] allow\|deny <target> [--ports ...]` · `forget <number> \| --all` | Change the remembered network rules (also in a running session). |
 | `aicatraz pins [-c file] list` | Show the files whose approved version is remembered, and whether each is still as approved (`ok`, `changed`, `missing`). |
 | `aicatraz pins [-c file] forget <path>... \| --missing \| --all` | Forget pins: the next time a rule runs them they need approval again. `--missing` drops pins of files that are gone. |
 | `aicatraz bar-colors` | Show the status bar in every color theme. |
@@ -155,6 +157,21 @@ A project is identified by the real path of its config file; set `project.id` to
 - [docs/security.md](docs/security.md): threat model, what is enforced, known risks.
 - [idea-v2.md](idea-v2.md): the design in full, with the reasoning.
 - [milestones.md](milestones.md): how it was built.
+
+## Limiting the network
+
+By default the jail can connect anywhere. A `network` section in the config limits that, for every protocol: an allowlist of host names (with `*.domain`), IP addresses and CIDR ranges, with ports as a list, a range or `*`. Whatever no rule covers is asked about, the way `ask` rules are: in the `aicatraz up` overlay you can allow it once, for the session, or for good, and change the ports before you do (`22, 80, 443, 8000-8080`).
+
+```yaml
+network:
+  default: ask
+  rules:
+    - {to: api.anthropic.com, ports: 443, decision: allow}
+    - {to: "*.github.com", ports: [22, 443], decision: allow}
+    - {to: 10.20.0.0/16, ports: "5432, 5433", decision: allow}
+```
+
+It runs a small helper container that owns the jail's network (built once, from Debian; needs network access that one time). See [the reference](docs/configuration.md#network) and [what it does and does not stop](docs/security.md#network-rules).
 
 ## The session's status bar
 
