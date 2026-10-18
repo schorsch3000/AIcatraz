@@ -129,7 +129,7 @@ func unwrap(err error) error {
 
 // prepare creates the per-project config directories and copies the user's
 // configuration into them (Sync entries overwrite, so changes carry over).
-func (a *agentRun) prepare(image string) error {
+func (a *agentRun) prepare(image, cwd string) error {
 	// The agents are dynamically linked against glibc. On Alpine (musl) the
 	// kernel's "no such file" for the missing loader is all one would see.
 	if !imageHasFile("docker", image, "/lib64/ld-linux-x86-64.so.2") && !imageHasFile("docker", image, "/lib/ld-linux-aarch64.so.1") {
@@ -138,6 +138,11 @@ func (a *agentRun) prepare(image string) error {
 	for _, r := range a.profile.Roots {
 		if err := agent.SyncRoot(a.home, r, a.roots[r.Path]); err != nil {
 			return fmt.Errorf("copying your %s configuration (%s): %w", a.profile.Name, r.Path, err)
+		}
+	}
+	if a.profile.Name == "claude" {
+		if err := agent.TrustClaudeDir(a.roots[".claude"], cwd); err != nil {
+			return fmt.Errorf("marking %s as trusted for claude: %w", cwd, err)
 		}
 	}
 	return nil

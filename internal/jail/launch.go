@@ -223,7 +223,7 @@ func Launch(o Options) (int, error) {
 	}
 
 	if ag != nil {
-		if err := ag.prepare(img.Ref); err != nil {
+		if err := ag.prepare(img.Ref, in.Cwd); err != nil {
 			return 0, err
 		}
 	}

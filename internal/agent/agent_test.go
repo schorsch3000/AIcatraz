@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -403,5 +404,24 @@ func TestOpencodeSessions(t *testing.T) {
 	}
 	if _, err := ParseOpencodeSessions([]byte("not json")); err == nil {
 		t.Error("bad json")
+	}
+}
+
+func TestTrustClaudeDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".claude.json"), []byte(`{"theme":"dark","projects":{"/w":{"x":1}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := TrustClaudeDir(dir, "/w"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, ".claude.json"))
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	p := doc["projects"].(map[string]any)["/w"].(map[string]any)
+	if p["hasTrustDialogAccepted"] != true || p["x"] != float64(1) || doc["theme"] != "dark" {
+		t.Fatalf("got %s", data)
 	}
 }

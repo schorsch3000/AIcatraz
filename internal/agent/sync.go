@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -169,4 +170,42 @@ func mirrorFile(src, dst string, st fs.FileInfo, budget *int64) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), dst)
+}
+
+// TrustClaudeDir marks dir as trusted in the .claude.json inside the jail's
+// Claude config directory. The file is re-copied from the host on every launch,
+// which would otherwise bring back the "do you trust this folder" question each
+// time; the jail is the boundary, so the question adds nothing there.
+func TrustClaudeDir(cfgDir, dir string) error {
+	path := filepath.Join(cfgDir, ".claude.json")
+	doc := map[string]any{}
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return err
+	default:
+		if err := json.Unmarshal(data, &doc); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	projects, _ := doc["projects"].(map[string]any)
+	if projects == nil {
+		projects = map[string]any{}
+	}
+	entry, _ := projects[dir].(map[string]any)
+	if entry == nil {
+		entry = map[string]any{}
+	}
+	if entry["hasTrustDialogAccepted"] == true {
+		return nil
+	}
+	entry["hasTrustDialogAccepted"] = true
+	projects[dir] = entry
+	doc["projects"] = projects
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o600)
 }
