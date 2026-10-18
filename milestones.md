@@ -45,7 +45,7 @@ The first version of the door.
 
 ## M3: `ask` and the tmux session
 
-*Status: implemented. Prompts, answers, session grants, timeouts, heartbeats during the wait, withdrawal on interrupt, the `--approval-tty` fallback and `shell` are tested against real containers. The tmux layer (`up`, popup) is tested against a stand-in `tmux` script only, because tmux is not installed on this machine; it needs one run against real tmux. The broker lives inside `aicatraz run` rather than in a pane of its own.*
+*Status: implemented. Prompts, answers, session grants, timeouts, heartbeats during the wait, withdrawal on interrupt, the `--approval-tty` fallback and `shell` are tested against real containers. The tmux layer (`up --tmux`, popup) is tested against a stand-in `tmux` script, and was run once by hand against real tmux (popup shown, answered, audit log says `decided_by: human`). The broker lives inside `aicatraz run` rather than in a pane of its own.*
 - `aicatraz up` creates the tmux session (agent pane plus broker), `aicatraz shell` attaches.
 - `ask` shows a `tmux display-popup` with the full resolved command, cwd, env differences and matched rule.
 - Answers: once, for this session (exact argv, memory only), deny. Timeout means deny. Fallbacks: approval pane and `--approval-tty`.
@@ -88,6 +88,8 @@ The first version of the door.
 **Done when:** the host-side "rename over `.env`" scenario is detected; the linter catches the known bad configs; the adversarial suite is green; no leaked processes or sockets after any teardown path.
 
 ## M7: release polish
+
+*Status: implemented. `aicatraz init` and `--example` write starters, the README walks from clone to a jail, `docs/` covers the threat model, and `make release-check` verifies reproducible builds.*
 - `aicatraz init` writes a sample config and the symlink list for the image.
 - Example configs for common setups, user docs (threat model and known risks included), reference Dockerfile.
 - Versioned release builds, reproducible build notes.
