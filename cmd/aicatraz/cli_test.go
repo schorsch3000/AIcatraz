@@ -78,6 +78,10 @@ func TestDispatch(t *testing.T) {
 		t.Errorf("aicatraz name should run the CLI, got %d", code)
 	}
 
+	if code := run("aicatraz-v0.1.1-linux-amd64", []string{"version"}); code != 0 {
+		t.Errorf("release file name should run the CLI, got %d", code)
+	}
+
 	// With a broker socket present (inside a jail) "az" is a proxied command.
 	sock := filepath.Join(t.TempDir(), "broker.sock")
 	if err := os.WriteFile(sock, nil, 0o600); err != nil {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 (2026-10-18)
+
+- Fix: `aicatraz up`, `claude` and `agent` failed with "the session server did not start" when the binary was reached through a symlink to a release file such as `aicatraz-v0.1.1-linux-amd64`. The re-executed server saw its resolved file name and ran as the shim. Any `aicatraz-*` name now runs the CLI.
+
 ## 0.1.0 (2026-10-18)
 
 First release.
