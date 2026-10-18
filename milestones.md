@@ -67,7 +67,7 @@ The first version of the door.
 
 ## M5: agent entrypoints
 
-*Status: implemented. Tested with stand-in agents in real containers (config sync, persistence, discarding the agent's edits, session recording and resume for both agents), and the real installers, binaries and config locations were checked once: both agents install through the helper container, run in a Debian jail, and keep their configuration inside the mounted per-project directories. Not yet checked: a real authenticated conversation, and Claude Code's one-time "bypass permissions" confirmation in the jail.*
+*Status: implemented. Tested with stand-in agents in real containers (config sync, persistence, discarding the agent's edits, session recording and resume for both agents), and the real installers, binaries and config locations were checked once: both agents install through the helper container, run in a Debian jail, and keep their configuration inside the mounted per-project directories. A real authenticated Claude Code conversation in the jail was also checked by hand and works, and Claude Code's one-time "bypass permissions" confirmation is skipped thanks to the trusted-workspace entry in the jail's config.*
 - `aicatraz claude`, `aicatraz opencode`: built-in profiles for install location, config files, start command.
 - Tool cache on the host (`~/.local/share/aicatraz/tools/<tool>/<version>`) installed by a throwaway helper container, mounted read-only; `aicatraz tools update` and version pinning.
 - Config mapping: per-project state directory mounted at the agent's config path. `sync` entries are re-copied from the real config on every launch (overwriting), `persist` entries are kept.
