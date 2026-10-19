@@ -72,7 +72,7 @@ const usage = `usage:
   aicatraz init [--example name] [--list] [--force]
                                  write a starter ` + defaultConfig + ` (and Dockerfile.az) here
   aicatraz init dockerfile [--force]
-                                 write a one-line Dockerfile.az (FROM the distribution
+                                 write a Dockerfile.az (FROM the distribution
                                  this machine runs)
   aicatraz completion bash|zsh|fish
                                  print shell completion code to source

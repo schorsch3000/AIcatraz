@@ -17,8 +17,8 @@ var osReleasePath = "/etc/os-release"
 
 const dockerfileName = "Dockerfile.az"
 
-// runInitDockerfile writes a one-line Dockerfile.az whose base image matches
-// the distribution this machine runs.
+// runInitDockerfile writes a short Dockerfile.az whose base image matches
+// the distribution this machine runs, with a line that upgrades its packages.
 func runInitDockerfile(args []string, stdout, stderr io.Writer) int {
 	force := false
 	for _, a := range args {
@@ -36,7 +36,8 @@ func runInitDockerfile(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer f.Close()
-	image, note, ok := baseImage(osrelease.Parse(f))
+	rel := osrelease.Parse(f)
+	image, note, ok := baseImage(rel)
 	if !ok {
 		ui.Error(stderr, "no matching base image for this distribution; write a `FROM <image>` line into %s yourself", dockerfileName)
 		return 1
@@ -46,7 +47,7 @@ func runInitDockerfile(args []string, stdout, stderr io.Writer) int {
 		ui.Error(stderr, "%s already exists; nothing written (use --force to overwrite)", dockerfileName)
 		return 1
 	}
-	if err := os.WriteFile(dockerfileName, []byte("FROM "+image+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(dockerfileName, []byte("FROM "+image+"\n"+upgradeLine(rel)), 0o644); err != nil {
 		ui.Error(stderr, "%v", err)
 		return 2
 	}
@@ -119,4 +120,26 @@ func baseImage(rel map[string]string) (image, note string, ok bool) {
 		return "debian:stable", fmt.Sprintf("%s is based on Debian; using the current stable release", rel["NAME"]), true
 	}
 	return "", "", false
+}
+
+// upgradeLine returns the RUN line that upgrades the image's packages, ending
+// in a commented-out install command to extend. The package manager is the one
+// of the distribution baseImage chose.
+func upgradeLine(rel map[string]string) string {
+	switch rel["ID"] {
+	case "fedora", "rocky", "almalinux", "centos", "rhel":
+		return "RUN dnf upgrade -y # && dnf install -y\n"
+	case "amzn":
+		if rel["VERSION_ID"] == "2" { // Amazon Linux 2 predates dnf
+			return "RUN yum update -y # && yum install -y\n"
+		}
+		return "RUN dnf upgrade -y # && dnf install -y\n"
+	case "alpine":
+		return "RUN apk update && apk upgrade # && apk add\n"
+	case "arch":
+		return "RUN pacman -Syu --noconfirm # && pacman -S --noconfirm\n"
+	case "opensuse-leap", "opensuse-tumbleweed":
+		return "RUN zypper --non-interactive update # && zypper --non-interactive install\n"
+	}
+	return "RUN apt update && apt upgrade -y # && apt install -y\n"
 }

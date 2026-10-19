@@ -3,6 +3,7 @@
 ## Unreleased
 
 - The starter `aicatraz.yaml` written by `aicatraz init` now sets `project.id` (from the directory name), uses `network: {default: ask}` so every connection is asked about, and has an active `bar:` section with a theme drawn at random.
+- `aicatraz init dockerfile` adds a `RUN` line that upgrades the image's packages (`apt`, `dnf`, `yum`, `apk`, `pacman` or `zypper`, to match the distribution), with the install command commented out to extend.
 
 ## 0.1.2 (2026-10-18)
 

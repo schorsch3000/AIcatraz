@@ -7,7 +7,7 @@ The README has the short version. This is the full list.
 | Command | What it does |
 |---|---|
 | `aicatraz init [--example name] [--list] [--force]` | Write a starter `aicatraz.yaml` (and `Dockerfile.az`) into this directory. Never overwrites without `--force`. |
-| `aicatraz init dockerfile [--force]` | Write a one-line `Dockerfile.az` (`FROM debian:13`, `FROM ubuntu:24.04`, ...) matching the distribution this machine runs. Knows Debian, Ubuntu, Fedora, Alpine, Rocky, AlmaLinux, CentOS Stream, RHEL, Arch, openSUSE, Amazon Linux and their Ubuntu and Debian derivatives. Never overwrites without `--force`. |
+| `aicatraz init dockerfile [--force]` | Write a `Dockerfile.az` (`FROM debian:13`, `FROM ubuntu:24.04`, ...) matching the distribution this machine runs, followed by a `RUN` line that upgrades the packages, with the install command commented out for you to extend (`apt`, `dnf`, `yum`, `apk`, `pacman` or `zypper`, as the distribution uses). Knows Debian, Ubuntu, Fedora, Alpine, Rocky, AlmaLinux, CentOS Stream, RHEL, Arch, openSUSE, Amazon Linux and their Ubuntu and Debian derivatives. Never overwrites without `--force`. |
 | `aicatraz completion bash\|zsh\|fish` | Print shell completion code for `aicatraz` and `az`; see [Shell completion](#shell-completion). |
 | `aicatraz config check [file]` | Validate a config; warn about rules that are valid but risky. |
 | `aicatraz run [flags] [-- command...]` | Start the jail in this terminal. Default command: a shell. |

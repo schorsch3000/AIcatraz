@@ -144,7 +144,7 @@ func TestInitDockerfile(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "Dockerfile.az"))
-	if string(b) != "FROM debian:13\n" {
+	if string(b) != "FROM debian:13\nRUN apt update && apt upgrade -y # && apt install -y\n" {
 		t.Errorf("Dockerfile.az = %q", b)
 	}
 
@@ -159,5 +159,24 @@ func TestInitDockerfile(t *testing.T) {
 	}
 	if code := cli([]string{"init", "dockerfile", "--force"}, &out, &errb); code != 0 {
 		t.Errorf("--force: exit %d", code)
+	}
+}
+
+func TestUpgradeLine(t *testing.T) {
+	for rel, want := range map[string]string{
+		"ID=debian": "RUN apt update && apt upgrade -y # && apt install -y\n",
+		"ID=ubuntu": "RUN apt update && apt upgrade -y # && apt install -y\n",
+		"ID=linuxmint\nID_LIKE=\"ubuntu debian\"": "RUN apt update && apt upgrade -y # && apt install -y\n",
+		"ID=fedora":                "RUN dnf upgrade -y # && dnf install -y\n",
+		"ID=rocky":                 "RUN dnf upgrade -y # && dnf install -y\n",
+		"ID=amzn\nVERSION_ID=2":    "RUN yum update -y # && yum install -y\n",
+		"ID=amzn\nVERSION_ID=2023": "RUN dnf upgrade -y # && dnf install -y\n",
+		"ID=alpine":                "RUN apk update && apk upgrade # && apk add\n",
+		"ID=arch":                  "RUN pacman -Syu --noconfirm # && pacman -S --noconfirm\n",
+		"ID=opensuse-leap":         "RUN zypper --non-interactive update # && zypper --non-interactive install\n",
+	} {
+		if got := upgradeLine(osrelease.Parse(strings.NewReader(rel))); got != want {
+			t.Errorf("%q: got %q, want %q", rel, got, want)
+		}
 	}
 }
