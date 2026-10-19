@@ -5,6 +5,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,10 +25,15 @@ func main() {
 // once its symlink is resolved) and the short alias "az" are the CLI, any other
 // name is a proxied command and runs as the shim.
 // Inside a jail (the broker socket is mounted) "az" stays a proxied command,
-// so a rule for the Azure CLI keeps working.
+// so a rule for the Azure CLI keeps working. "aicatraz" and release names
+// refuse to run inside a jail.
 func run(name string, args []string) int {
 	if isReleaseName(name) {
 		name = "aicatraz"
+	}
+	if name == "aicatraz" && insideJail() {
+		fmt.Fprintln(os.Stderr, "aicatraz: refusing to run inside a jail")
+		return 1
 	}
 	if name == "aicatraz" || (name == "az" && !insideJail()) {
 		ui.Prog = name

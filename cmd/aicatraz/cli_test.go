@@ -91,6 +91,11 @@ func TestDispatch(t *testing.T) {
 	if code := run("az", []string{"version"}); code == 0 {
 		t.Errorf("az inside a jail should run the shim, got the CLI")
 	}
+	for _, n := range []string{"aicatraz", "aicatraz-v0.1.1-linux-amd64"} {
+		if code := run(n, []string{"version"}); code == 0 {
+			t.Errorf("%s inside a jail should refuse, got exit 0", n)
+		}
+	}
 }
 
 func TestUsageUsesInvokedName(t *testing.T) {
