@@ -358,6 +358,24 @@ func (s *Screen) csiOut(param []byte, final byte, whole []byte) []byte {
 			b = h
 		}
 		return []byte(fmt.Sprintf("\x1b[%d;%dr", t, b))
+	case 'H', 'f', 'd': // absolute row (CUP, HVP, VPA): the bar row is not the program's
+		p := params(param)
+		h := s.AgentRows()
+		row := 0
+		if len(p) > 0 {
+			row = p[0]
+		}
+		if row <= h {
+			return whole
+		}
+		if final == 'd' {
+			return []byte(fmt.Sprintf("\x1b[%dd", h))
+		}
+		col := ""
+		if len(p) > 1 && p[1] > 0 {
+			col = strconv.Itoa(p[1])
+		}
+		return []byte(fmt.Sprintf("\x1b[%d;%s%c", h, col, final))
 	case 'J': // erase in display: from the cursor to the end of the screen (the default), or all of it, reaches the bar row
 		if p := string(param); p == "" || p == "0" || p == "2" || p == "3" {
 			s.dirty = true

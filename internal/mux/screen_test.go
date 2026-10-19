@@ -30,6 +30,8 @@ func TestScreenKeepsTheProgramAboveTheBar(t *testing.T) {
 		"\x1b[3;10r":           "\x1b[3;10r",
 		"\x1b[5;99r":           "\x1b[5;29r",
 		"\x1b[;20r":            "\x1b[1;20r",
+		"\x1b[30;5H":           "\x1b[29;5H", // a row on the bar is pulled up to the last program row
+		"\x1b[99;H\x1b[30d":    "\x1b[29;H\x1b[29d",
 		"plain \x1b[31mtext":   "plain \x1b[31mtext",
 		"\x1b7\x1b8\x1bM":      "\x1b7\x1b8\x1bM",
 		"\x1b(B\x1b)0":         "\x1b(B\x1b)0",

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 (2026-10-20)
+
+- Fix: the status bar of `aicatraz up` stayed damaged when the program never went quiet, such as opencode's thinking spinner drawing over it. The bar is now repainted at least once a second even while the program is writing, and absolute row addressing (CUP, HVP, VPA) is kept above the bar row.
+
 ## 0.3.0 (2026-10-19)
 
 - When there is no user config, the first `init`, `run`, `up`, `claude`, ... writes `~/.config/aicatraz/config.yaml` with every setting commented out at its default. An existing file is never changed.

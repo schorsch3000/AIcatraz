@@ -646,9 +646,10 @@ func (c *client) idle() {
 			c.emit(b)
 		}
 	}
-	// Whatever the program did, the bar comes back within a second of it going
-	// quiet: a repaint costs a few bytes, and covers anything not foreseen.
-	if c.scr.Active() && c.overlay == nil && now.Sub(c.lastOutput) > 400*time.Millisecond && now.Sub(c.lastDraw) > time.Second {
+	// Whatever the program did, the bar comes back within a second: a repaint
+	// costs a few bytes, and covers anything not foreseen. A program that never
+	// goes quiet (an animated spinner) must not keep a damaged bar either.
+	if c.scr.Active() && c.overlay == nil && now.Sub(c.lastDraw) > time.Second {
 		c.drawBar(true)
 	}
 }
