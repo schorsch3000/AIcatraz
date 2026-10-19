@@ -6,7 +6,7 @@ The README has the short version. This is the full list.
 
 | Command | What it does |
 |---|---|
-| `aicatraz init [--example name] [--list] [--force]` | Write a starter `aicatraz.yaml` (and `Dockerfile.az`) into this directory. Never overwrites without `--force`. |
+| `aicatraz init [--example name] [--list] [--force]` | Write a starter `aicatraz.yaml` (and `Dockerfile.az`) into this directory. The starter sets `project.id` from the directory name, asks about every network connection (`network: {default: ask}`) and picks a random status bar theme. Never overwrites without `--force`. |
 | `aicatraz init dockerfile [--force]` | Write a `Dockerfile.az` (`FROM debian:13`, `FROM ubuntu:24.04`, ...) matching the distribution this machine runs, followed by a `RUN` line that upgrades the packages, with the install command commented out for you to extend (`apt`, `dnf`, `yum`, `apk`, `pacman` or `zypper`, as the distribution uses). Knows Debian, Ubuntu, Fedora, Alpine, Rocky, AlmaLinux, CentOS Stream, RHEL, Arch, openSUSE, Amazon Linux and their Ubuntu and Debian derivatives. Never overwrites without `--force`. |
 | `aicatraz completion bash\|zsh\|fish` | Print shell completion code for `aicatraz` and `az`; see [Shell completion](#shell-completion). |
 | `aicatraz config check [file]` | Validate a config; warn about rules that are valid but risky. |
@@ -59,7 +59,8 @@ aicatraz completion fish | source        # fish (or save to ~/.config/fish/compl
 |---|---|---|
 | `the file is not read from here on: this line is indented differently ...` | A line is indented less than the first key of the file, and YAML stops reading there: usually an example switched on by removing only the `#`, which leaves a space in front of the key. | Remove the space too, so every top-level key starts in column 1. |
 | `volume ...: ... does not exist` | A hidden path must exist at launch (otherwise the agent could create it). | Create the file or directory. |
-| The agent can't reach its service, `connection refused` everywhere | The jail has no network unless the config gives it one. | Add `network: open`, or rules (see [`network`](configuration.md#network)). |
+| The agent can't reach its service, `connection refused` everywhere | The jail has no network unless the config gives it one (the starter from `init` asks about each connection instead). | Add `network: open`, or rules (see [`network`](configuration.md#network)). |
+| `aicatraz: refusing to run inside a jail` | The CLI was started inside a jail (the broker socket is mounted). | Run it on the host. `az` inside a jail stays a proxied command. |
 | `no approval terminal: ask rules will be denied` | Nobody can be asked. | Start with `aicatraz up`, or pass `--approval-tty`. |
 | `build files changed since they were last approved` | `Dockerfile.az` is new or changed, and there is no terminal to ask. | Run `aicatraz run` interactively once and answer `p`, or pass `--approve-build`. |
 | `the image ... has no glibc dynamic loader` | The agents don't run on Alpine. | Use a Debian/Ubuntu-based image. |

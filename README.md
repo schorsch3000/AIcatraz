@@ -23,10 +23,11 @@ It contains the *scope*, not the secrets inside it: an agent you let reach the n
 - **Mounts with three modes.** `rw`, `ro`, or `hi` (hidden: the file reads as empty, though host commands can still use it). Your real home is never mounted; the jail's `~` is an empty directory.
 - **A door to the host.** The commands the agent may run *on your machine* are listed in the config, with exact arguments. Each is `allow`, `ask` (you get a prompt), `local` (runs inside the jail) or `deny`. Anything not listed is refused.
 - **Pinned scripts.** `make deploy` means "do whatever the Makefile says", and the agent can edit the Makefile. So the files a rule depends on are pinned: if one changes, the call asks again and shows the diff.
-- **No network by default.** `network: open` for the normal one, or rules that allow named hosts, IPs and ports and ask about the rest. [Details](docs/configuration.md#network).
+- **No network unless configured.** Without a `network` section the jail has none. `network: open` gives it the normal one; `network: {default: ask}` (what `aicatraz init` writes) asks about every connection, and rules allow named hosts, IPs and ports up front. [Details](docs/configuration.md#network).
 - **Agents out of the box.** `aicatraz claude` and `aicatraz opencode` install the agent, copy your settings in, and remember sessions for `aicatraz resume`. [Details](docs/agents.md).
-- **Sessions you can walk away from.** `aicatraz up` keeps the jail running when you detach (`Ctrl-Y`), shows approval prompts over the agent's screen, and has a status bar.
+- **Sessions you can walk away from.** `aicatraz up` keeps the jail running when you detach (`Ctrl-Y`), shows approval prompts over the agent's screen (held back while you type), and has a status bar.
 - **The odds and ends.** Published ports (reach a dev server from your browser), USB devices that survive being unplugged (Arduino, ESP, Pico), `sudo` inside the jail if you must, and an audit log of every request.
+- **Settings that are yours.** `~/.config/aicatraz/config.yaml` is written on first use, with everything commented out. It holds the approval timing, status bar, network default and the like for all projects; it can't hold volumes or rules, so it can't widen a jail. [Details](docs/configuration.md#the-user-config).
 
 ## Requirements
 
@@ -46,12 +47,12 @@ source <(aicatraz completion bash)              # also: zsh, fish
 
 ```bash
 cd ~/git/myproject
-aicatraz init                # writes aicatraz.yaml; `init --list` shows other starters
+aicatraz init                # writes aicatraz.yaml (asks about every connection); `init --list` shows other starters
 aicatraz config check        # checks it and warns about things that look unwise
 aicatraz run                 # a shell in the jail
 ```
 
-You are now in a Debian container as yourself, with the project at the same path as on your machine and nothing else. Try `ls ~`: it is empty, which is the point.
+You are now in a Debian container as yourself, with the project at the same path as on your machine and nothing else. Try `ls ~`: it is empty, which is the point. Network connections from the jail show up as prompts for you to allow or refuse (in `run` they need `--approval-tty`; in `up` they appear over the screen).
 
 Then add a rule so the agent can do one useful thing on your machine, and see what happens when it asks:
 
@@ -62,7 +63,7 @@ volumes:
   - ./aicatraz.yaml:hi                    # the agent can't read or edit its own rules
   - ./.env:hi                             # a secret it must not see
 
-network: open                             # off by default
+network: open                             # without this section: no network
 
 rules:
   - command: make
@@ -96,11 +97,12 @@ aicatraz claude                           # first run installs it; later runs ju
 
 ## Things that surprise people
 
-- **"Connection refused" everywhere.** The jail has no network until the config gives it one. Add `network: open`, or rules.
+- **"Connection refused" everywhere.** A config with no `network` section (or `network: off`) gives the jail no network. Add `network: open`, or `default: ask` and rules. With the starter config the first connection to each host asks you instead.
 - **A hidden file must exist.** Otherwise the agent could create it, and then it would not be hidden any more.
 - **`up` starts below your command and leaves your screen alone.** The bar at the bottom is the status bar; `--status-bar off` removes it, `aicatraz bar-colors` lets you pick a colour.
 - **A prompt appeared out of nowhere.** That is the door doing its job. `y` runs it once, `s` for the session, `p` remembers it, `b` blocks it for good, anything else says no.
-- **The agent says a tool is missing.** The image is yours to fill: `Dockerfile.az` next to the config (`aicatraz init dockerfile` writes a start).
+- **The agent says a tool is missing.** The image is yours to fill: `Dockerfile.az` next to the config (`aicatraz init dockerfile` writes a start, with a package upgrade line you can replace in the user config).
+- **`aicatraz` refuses to run in the jail.** On purpose: the CLI is for the host only.
 
 ## Where to read more
 
