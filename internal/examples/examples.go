@@ -20,6 +20,13 @@ import (
 //go:embed data
 var data embed.FS
 
+// UserConfig returns the user-wide config written when there is none: every
+// option, commented out, with its default.
+func UserConfig() string {
+	b, _ := fs.ReadFile(data, "data/user-config.yaml")
+	return string(b)
+}
+
 // ConfigFile is the name of the main file of every example.
 const ConfigFile = "aicatraz.yaml"
 

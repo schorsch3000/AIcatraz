@@ -18,7 +18,7 @@ import (
 // defaults), not what a project is or what its agent may touch: volumes, image,
 // host command rules, ports, devices and sudo stay in the project's file, so a
 // setting you forgot about can never widen a jail.
-var userSections = []string{"approval", "canary", "global", "agent", "limits", "env", "network", "bar"}
+var userSections = []string{"approval", "canary", "global", "agent", "limits", "env", "network", "bar", "init"}
 
 // UserConfigPath is where the user-wide config lives: $XDG_CONFIG_HOME/aicatraz/config.yaml,
 // or ~/.config/aicatraz/config.yaml. It is on the host and never mounted into a jail.
@@ -63,6 +63,10 @@ func Load(path string, opts Options) (*Config, []Problem, error) {
 	applyUser(cfg, user, &root)
 	return cfg, problems, nil
 }
+
+// LoadUser reads the user-wide config of home for commands that run without a
+// project config. Nil, nil: there is none.
+func LoadUser(home string) (*Config, error) { return loadUser(home) }
 
 // loadUser reads and validates the user-wide config. Nil, nil: there is none.
 func loadUser(home string) (*Config, error) {

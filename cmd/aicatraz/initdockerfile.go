@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/osrelease"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
@@ -43,11 +44,17 @@ func runInitDockerfile(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	upgrade, err := upgradeLines(rel)
+	if err != nil {
+		ui.Error(stderr, "%v", err)
+		return 1
+	}
+
 	if _, err := os.Lstat(dockerfileName); err == nil && !force {
 		ui.Error(stderr, "%s already exists; nothing written (use --force to overwrite)", dockerfileName)
 		return 1
 	}
-	if err := os.WriteFile(dockerfileName, []byte("FROM "+image+"\n"+upgradeLine(rel)), 0o644); err != nil {
+	if err := os.WriteFile(dockerfileName, []byte("FROM "+image+"\n"+upgrade), 0o644); err != nil {
 		ui.Error(stderr, "%v", err)
 		return 2
 	}
@@ -120,6 +127,27 @@ func baseImage(rel map[string]string) (image, note string, ok bool) {
 		return "debian:stable", fmt.Sprintf("%s is based on Debian; using the current stable release", rel["NAME"]), true
 	}
 	return "", "", false
+}
+
+// upgradeLines returns the lines that follow FROM: the user config's
+// init.dockerfile.lines if it sets them, else the distribution's upgrade line.
+func upgradeLines(rel map[string]string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return upgradeLine(rel), nil
+	}
+	user, err := config.LoadUser(home)
+	if err != nil {
+		return "", err
+	}
+	if user == nil || user.Init.Dockerfile.Lines == nil {
+		return upgradeLine(rel), nil
+	}
+	lines := *user.Init.Dockerfile.Lines
+	if lines != "" && !strings.HasSuffix(lines, "\n") {
+		lines += "\n"
+	}
+	return lines, nil
 }
 
 // upgradeLine returns the RUN line that upgrades the image's packages, ending

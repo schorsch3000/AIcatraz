@@ -32,6 +32,7 @@ type Config struct {
 	Ports    []string  `yaml:"ports"`
 	Devices  []Device  `yaml:"devices"`
 	Bar      BarStyle  `yaml:"bar"`
+	Init     Init      `yaml:"init"`
 
 	// Sudo gives the user passwordless sudo in the jail (see docs/security.md
 	// for what that costs). Default off.
@@ -45,6 +46,18 @@ type Config struct {
 	PortMaps []PortMap `yaml:"-"`
 	// NetRules is filled in by validation: the network rules, parsed.
 	NetRules []egress.Rule `yaml:"-"`
+}
+
+// Init tunes what `aicatraz init` writes. It only has an effect in the user config.
+type Init struct {
+	Dockerfile InitDockerfile `yaml:"dockerfile"`
+}
+
+// InitDockerfile tunes `aicatraz init dockerfile`.
+type InitDockerfile struct {
+	// Lines replace the package upgrade line that follows FROM. Nil keeps the
+	// distribution's default; an empty string writes no line.
+	Lines *string `yaml:"lines"`
 }
 
 type Project struct {

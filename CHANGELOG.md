@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- When there is no user config, the first `init`, `run`, `up`, `claude`, ... writes `~/.config/aicatraz/config.yaml` with every setting commented out at its default. An existing file is never changed.
+- `init.dockerfile.lines` in the user config replaces the upgrade line that `aicatraz init dockerfile` writes; `""` writes none.
+
 ## 0.2.0 (2026-10-19)
 
 - Approval prompts in `aicatraz up` no longer take over the screen while you type. A prompt that arrives while you are typing waits: the status bar blinks `⚠️ Network host:port  Ctrl-Q` (or `Command ...`), and the prompt opens after `approval.idle` (5s) without typing, or when you press Ctrl-Q. A prompt that opens still ignores keys for `approval.guard` (500ms), and its timeout now starts when it opens. `bar.symbol` and `bar.symbol_width` set the symbol in front of the message and the columns it takes.

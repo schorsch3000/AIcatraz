@@ -1,0 +1,89 @@
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║  config.yaml: your user-wide AIcatraz settings                         ║
+# ║  Written once by AIcatraz; it never touches this file again.           ║
+# ╚════════════════════════════════════════════════════════════════════════╝
+#
+# Settings that are about you, not about a project. Every project's aicatraz.yaml
+# starts from them: a key the project sets wins over the one here, key by key
+# (`network` is replaced as a whole section).
+#
+# Everything below is commented out and shows the built-in default. To change one,
+# remove the `# ` (the hash and the space after it), so that the key starts in the
+# first column, and set the value.
+#
+# This file is read on the host and never mounted into a jail. It may only hold the
+# sections below. Volumes, image, rules, ports, devices and sudo stay in the
+# project's file, so a setting you forgot about can never widen a jail.
+#
+#   aicatraz config check     check a project's config (this file is checked with it)
+
+# ── APPROVAL ─────────────────────────────────────────────────────────────────
+# How the prompts for `ask` rules behave.
+# approval:
+#   timeout: 2m                  # a prompt counts as a deny after this long (5s to 1h), counted from when it opens
+#   idle: 5s                     # in `aicatraz up` a prompt waits (the bar blinks) until you stopped typing this long; 0: at once
+#   guard: 500ms                 # a prompt that has just opened ignores keys for this long (100ms to 5s)
+
+# ── CANARY ───────────────────────────────────────────────────────────────────
+# What happens when a hidden path turns out to be visible (say, replaced on the host).
+# canary:
+#   action: stop                 # stop the session, warn once, or off
+#   interval: 3s                 # how often to check (200ms to 1h)
+
+# ── GLOBAL ───────────────────────────────────────────────────────────────────
+# Variable names (globs) that are never passed to a host command, on top of the
+# built-in set (LD_*, PATH, BASH_ENV, ...), which no config can override.
+# global:
+#   env_strip: []                # for example ["AWS_*"]
+
+# ── ENVIRONMENT ──────────────────────────────────────────────────────────────
+# Environment variables in every jail.
+# env:
+#   static: {}                   # fixed values, for example {EDITOR: vim}
+#   from_host: []                # names copied from your shell at launch, for example [LANG]; the agent can read them
+
+# ── LIMITS ───────────────────────────────────────────────────────────────────
+# Resource limits for every jail.
+# limits:
+#   pids: 1024                   # maximum number of processes
+#   memory: 2g                   # no limit if unset
+
+# ── NETWORK ──────────────────────────────────────────────────────────────────
+# What a jail can reach. Without this section (and without one in the project) the
+# jail has no network at all. `network: open` lets it connect anywhere; a mapping
+# checks every connection against the rules. A project that has its own `network`
+# section, even `network: off`, replaces this one as a whole.
+# network:
+#   default: ask                 # what a connection no rule covers does: ask or deny
+#   dns: open                    # or restricted: only names a rule covers resolve
+#   resolvers: []                # upstream DNS servers (default: this machine's), for example [1.1.1.1]
+#   rules: []                    # checked top to bottom, the first match wins:
+#     # - {to: api.anthropic.com, ports: 443, decision: allow}
+#     # - {to: "*.github.com", ports: [22, 443], decision: allow}
+
+# ── CODING AGENT ─────────────────────────────────────────────────────────────
+# The coding agent for `aicatraz agent`. `aicatraz claude` and `aicatraz opencode` need no config.
+# agent:
+#   tool: claude                 # claude or opencode (default: none)
+#   version: latest              # or a pinned version
+#   skip_permissions: true       # the jail is the boundary, so the agent's own prompts are redundant
+
+# ── LOOK ─────────────────────────────────────────────────────────────────────
+# The status bar of `aicatraz up` sessions. `aicatraz bar-colors` shows the themes.
+# A flag overrides this, and this overrides your AICATRAZ_BAR_* variables.
+# bar:
+#   theme: random                # a name from `aicatraz bar-colors`, or random (default: the built-in look)
+#   symbol: "⚠️"                 # before the alert of a waiting prompt; "" for none
+#   symbol_width: 2              # columns your terminal draws it in (default: a guess)
+#   fg: white                    # text color: a name, 0-255, #rrggbb or default
+#   bg: "#102030"                # background; fg and bg override the theme's
+
+# ── INIT ─────────────────────────────────────────────────────────────────────
+# What `aicatraz init` writes.
+# init:
+#   dockerfile:
+#     # The lines that follow FROM in the Dockerfile.az of `aicatraz init dockerfile`. By
+#     # default one line that upgrades the packages of the distribution, with an install
+#     # command to extend. "" writes none.
+#     lines: |
+#       RUN apt update && apt upgrade -y # && apt install -y

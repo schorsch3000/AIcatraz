@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/osrelease"
 	"os"
 	"path/filepath"
@@ -19,6 +20,15 @@ func inDir(t *testing.T) (dir, home string) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	// A user config that exists, so commands don't announce writing one.
+	uc := config.UserConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(uc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(uc, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(dir)
 	return dir, home
 }
@@ -133,6 +143,8 @@ func TestBaseImage(t *testing.T) {
 
 func TestInitDockerfile(t *testing.T) {
 	dir, _ := inDir(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 	rel := filepath.Join(t.TempDir(), "os-release")
 	os.WriteFile(rel, []byte("NAME=\"Debian GNU/Linux\"\nID=debian\nVERSION_ID=\"13\"\n"), 0o644)
 	old := osReleasePath
@@ -178,5 +190,64 @@ func TestUpgradeLine(t *testing.T) {
 		if got := upgradeLine(osrelease.Parse(strings.NewReader(rel))); got != want {
 			t.Errorf("%q: got %q, want %q", rel, got, want)
 		}
+	}
+}
+
+func TestInitDockerfileUserLines(t *testing.T) {
+	for _, c := range []struct{ yaml, want string }{
+		{"init: {dockerfile: {lines: \"RUN apt install -y git\"}}\n", "FROM debian:13\nRUN apt install -y git\n"},
+		{"init: {dockerfile: {lines: \"\"}}\n", "FROM debian:13\n"},
+	} {
+		dir, _ := inDir(t)
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CONFIG_HOME", "")
+		p := config.UserConfigPath(home)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte(c.yaml), 0o644)
+		rel := filepath.Join(t.TempDir(), "os-release")
+		os.WriteFile(rel, []byte("ID=debian\nVERSION_ID=\"13\"\n"), 0o644)
+		old := osReleasePath
+		osReleasePath = rel
+		var out, errb bytes.Buffer
+		code := cli([]string{"init", "dockerfile"}, &out, &errb)
+		osReleasePath = old
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, errb.String())
+		}
+		if b, _ := os.ReadFile(filepath.Join(dir, "Dockerfile.az")); string(b) != c.want {
+			t.Errorf("Dockerfile.az = %q, want %q", b, c.want)
+		}
+	}
+}
+
+func TestEnsureUserConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	path := config.UserConfigPath(home)
+
+	var errb bytes.Buffer
+	ensureUserConfig(&errb)
+	b, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(b), "# approval:") {
+		t.Fatalf("not written: %v", err)
+	}
+	if !strings.Contains(errb.String(), path) {
+		t.Errorf("no note: %q", errb.String())
+	}
+	// Every line is a comment, so it changes nothing, and the project config loads with it.
+	cfgPath := filepath.Join(t.TempDir(), "aicatraz.yaml")
+	os.WriteFile(cfgPath, []byte("volumes: [\".:rw\"]\n"), 0o644)
+	if _, ps, err := config.Load(cfgPath, config.Options{Home: home}); err != nil || config.HasErrors(ps) {
+		t.Fatalf("%v %+v", err, ps)
+	}
+
+	// An existing file is left alone, silently.
+	os.WriteFile(path, []byte("approval: {idle: 1s}\n"), 0o644)
+	errb.Reset()
+	ensureUserConfig(&errb)
+	if got, _ := os.ReadFile(path); string(got) != "approval: {idle: 1s}\n" || errb.Len() != 0 {
+		t.Errorf("changed: %q %q", got, errb.String())
 	}
 }

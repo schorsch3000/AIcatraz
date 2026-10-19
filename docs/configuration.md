@@ -22,13 +22,22 @@ agent:      { tool: claude, version: latest, skip_permissions: true }
 
 ## The user config
 
-Settings that are about you, not the project, can go into `~/.config/aicatraz/config.yaml` (or `$XDG_CONFIG_HOME/aicatraz/config.yaml`). It is read from the host and never mounted into a jail. It has the same format as the project's file, and may hold only `approval`, `canary`, `global`, `agent`, `limits`, `env`, `network` and `bar`; anything else (volumes, image, rules, ports, devices, `sudo`, `project`) is an error, so a setting you forgot about can't widen a jail.
+Settings that are about you, not the project, can go into `~/.config/aicatraz/config.yaml` (or `$XDG_CONFIG_HOME/aicatraz/config.yaml`). The first time you run `init`, `run`, `up`, `claude`, `opencode`, `agent`, `shell`, `down` or `resume` (not with `--print`) and there is no such file, AIcatraz writes one with every setting commented out at its default; it never touches an existing file. It is read from the host and never mounted into a jail. It has the same format as the project's file, and may hold only `approval`, `canary`, `global`, `agent`, `limits`, `env`, `network`, `bar` and `init`; anything else (volumes, image, rules, ports, devices, `sudo`, `project`) is an error, so a setting you forgot about can't widen a jail.
 
 ```yaml
 # ~/.config/aicatraz/config.yaml
 approval: { idle: 8s }
 bar: { theme: random, symbol: "⚠️", symbol_width: 2 }
 network: { default: ask }
+```
+
+`init.dockerfile.lines` replaces the package upgrade line that `aicatraz init dockerfile` writes after `FROM` (only the user config is read for this). Without it the line for your distribution is written; `""` writes none.
+
+```yaml
+init:
+  dockerfile:
+    lines: |
+      RUN apt update && apt upgrade -y && apt install -y git curl
 ```
 
 A key the project's file sets wins over the user's, key by key (`approval.timeout` in the project, `approval.idle` from you). `network` is the exception: if the project has a `network` section (even `network: off`), it replaces yours as a whole. Problems in the user config are reported when a project config is loaded, with the file's path.

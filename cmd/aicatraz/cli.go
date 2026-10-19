@@ -286,6 +286,10 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		opts.Command = rest
 	}
 
+	if !opts.Print { // --print changes nothing
+		ensureUserConfig(stderr)
+	}
+
 	if verb == "resume" {
 		s, err := chooseSession(opts, pick, os.Stdin, stderr)
 		if err != nil {
