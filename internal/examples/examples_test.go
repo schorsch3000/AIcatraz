@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/schorsch3000/aicatraz/internal/config"
+	"github.com/schorsch3000/aicatraz/internal/mux"
 )
 
 func TestEveryExampleIsAValidConfigWithoutWarnings(t *testing.T) {
@@ -93,9 +94,6 @@ func TestStarterCommentedOptionsAreValid(t *testing.T) {
 		var out []string
 		on := false
 		for _, l := range strings.Split(files[ConfigFile], "\n") {
-			if l == "network: off" { // the active line; the commented mapping stands in for it
-				continue
-			}
 			switch {
 			case keys.MatchString(l):
 				on = true
@@ -142,7 +140,25 @@ func TestProjectNameFromTheDirectory(t *testing.T) {
 		}
 	}
 	files, _ := Render("starter", "/foo/bar/baz")
-	if !strings.Contains(files[ConfigFile], "#   id: baz\n") || strings.Contains(files[ConfigFile], "{{") {
+	if !strings.Contains(files[ConfigFile], "  id: baz\n") || strings.Contains(files[ConfigFile], "{{") {
 		t.Errorf("the starter's example id should be the directory's name:\n%s", files[ConfigFile])
+	}
+}
+
+func TestStarterActivatesProjectNetworkAndBar(t *testing.T) {
+	old := randomIndex
+	defer func() { randomIndex = old }()
+	randomIndex = func(int) int { return 0 }
+	files, _ := Render("starter", "/foo/bar/baz")
+	text := files[ConfigFile]
+	for _, want := range []string{"\nproject:\n  id: baz\n", "\nnetwork:\n  default: ask", "\nbar:\n  theme: " + mux.Themes[0].Name + " "} {
+		if !strings.Contains(text, want) {
+			t.Errorf("starter lacks %q", want)
+		}
+	}
+	randomIndex = func(n int) int { return n - 1 }
+	files, _ = Render("starter", "/foo/bar/baz")
+	if !strings.Contains(files[ConfigFile], "theme: "+mux.Themes[len(mux.Themes)-1].Name+" ") {
+		t.Error("theme is not drawn through randomIndex")
 	}
 }

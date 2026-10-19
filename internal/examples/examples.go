@@ -7,11 +7,14 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/schorsch3000/aicatraz/internal/mux"
 )
 
 //go:embed data
@@ -67,7 +70,8 @@ func List() []Example {
 // `.`, relative to the config file, so they work wherever it is checked out.
 //
 // dir is the name of the directory the project is in: `{{PROJECT}}` in an
-// example becomes a project id made from it (see ProjectName).
+// example becomes a project id made from it (see ProjectName). `{{THEME}}`
+// becomes the name of a status bar theme, drawn at random.
 func Render(name, dir string) (map[string]string, error) {
 	files, err := fs.ReadDir(data, "data/"+name)
 	if err != nil {
@@ -78,15 +82,20 @@ func Render(name, dir string) (map[string]string, error) {
 		return nil, fmt.Errorf("unknown example %q (available: %s)", name, strings.Join(names, ", "))
 	}
 	out := map[string]string{}
+	theme := mux.Themes[randomIndex(len(mux.Themes))].Name
 	for _, f := range files {
 		b, err := fs.ReadFile(data, "data/"+name+"/"+f.Name())
 		if err != nil {
 			return nil, err
 		}
-		out[f.Name()] = strings.ReplaceAll(string(b), "{{PROJECT}}", ProjectName(dir))
+		text := strings.ReplaceAll(string(b), "{{PROJECT}}", ProjectName(dir))
+		out[f.Name()] = strings.ReplaceAll(text, "{{THEME}}", theme)
 	}
 	return out, nil
 }
+
+// randomIndex picks a number below n; tests replace it.
+var randomIndex = rand.IntN
 
 var notIDChar = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
