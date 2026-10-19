@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-19)
 
 - When there is no user config, the first `init`, `run`, `up`, `claude`, ... writes `~/.config/aicatraz/config.yaml` with every setting commented out at its default. An existing file is never changed.
 - `init.dockerfile.lines` in the user config replaces the upgrade line that `aicatraz init dockerfile` writes; `""` writes none.
