@@ -674,7 +674,11 @@ func (b *Broker) askHuman(conn *proto.Conn, in <-chan frame, h *proto.Hello, d p
 	b.audit(Entry{Event: "ask", Name: h.Name, Args: h.Args, Cwd: cwd, Rule: &rule, Binary: bin, EnvPassed: passed, PinNotes: deps.summary()})
 
 	timeout := b.opts.ApprovalTimeout
-	ctx, cancel := context.WithTimeout(b.ctx, timeout+approvalSlack)
+	wait := time.Duration(0) // an approver that holds a prompt back while the person types says how long
+	if w, ok := b.opts.Approver.(interface{ Wait() time.Duration }); ok {
+		wait = w.Wait()
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, timeout+approvalSlack+wait)
 	defer cancel()
 
 	stopPing := make(chan struct{})

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -227,17 +228,21 @@ func (v *validator) limits(c *Config) {
 }
 
 func (v *validator) approval(c *Config) {
-	t := c.Approval.Timeout
-	if t == "" {
-		return
+	check := func(key, val string, lo, hi time.Duration, loText, hiText, examples string) {
+		if val == "" {
+			return
+		}
+		d, err := time.ParseDuration(val)
+		switch {
+		case err != nil:
+			v.errorf([]any{"approval", key}, "invalid duration %q (examples: %s)", val, examples)
+		case d < lo || d > hi:
+			v.errorf([]any{"approval", key}, "%s must be between %s and %s", key, loText, hiText)
+		}
 	}
-	d, err := time.ParseDuration(t)
-	switch {
-	case err != nil:
-		v.errorf([]any{"approval", "timeout"}, "invalid duration %q (examples: 90s, 2m)", t)
-	case d < 5*time.Second || d > time.Hour:
-		v.errorf([]any{"approval", "timeout"}, "timeout must be between 5s and 1h")
-	}
+	check("timeout", c.Approval.Timeout, 5*time.Second, time.Hour, "5s", "1h", "90s, 2m")
+	check("idle", c.Approval.Idle, 0, 10*time.Minute, "0", "10m", "5s, 0")
+	check("guard", c.Approval.Guard, 100*time.Millisecond, 5*time.Second, "100ms", "5s", "500ms, 1s")
 }
 
 func (v *validator) canary(c *Config) {
@@ -545,6 +550,18 @@ func (v *validator) devices(c *Config) {
 
 func (v *validator) bar(c *Config) {
 	b := c.Bar
+	if b.Symbol != nil {
+		sym := *b.Symbol
+		switch {
+		case utf8.RuneCountInString(sym) > 8:
+			v.errorf([]any{"bar", "symbol"}, "symbol is too long (at most 8 characters)")
+		case strings.ContainsFunc(sym, func(r rune) bool { return r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) }):
+			v.errorf([]any{"bar", "symbol"}, "symbol must not contain control characters")
+		}
+	}
+	if w := b.SymbolWidth; w != nil && (*w < 0 || *w > 4) {
+		v.errorf([]any{"bar", "symbol_width"}, "symbol_width must be between 0 and 4")
+	}
 	// The same checks that pick the colors at launch, so a mistake shows up here.
 	if b.Theme != "" {
 		if _, err := mux.ResolveColors(b.Theme, "", ""); err != nil {

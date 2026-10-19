@@ -17,7 +17,46 @@ type BarInfo struct {
 	InfoKey string    // the key that shows the session's settings; empty: not offered
 	Started time.Time // when the session began
 	Colors  Colors    // zero means DefaultColors
+	Alert   string    // a prompt is waiting: shown in the middle, blinking, instead of the program and uptime
+
+	AlertSymbol      string // drawn before the alert text; empty: none
+	AlertSymbolWidth int    // the columns the terminal draws it in
 }
+
+// DefaultAlertSymbol is drawn before the text of an alert.
+const DefaultAlertSymbol = "⚠️"
+
+// SymbolWidth guesses how many columns a terminal draws a symbol in: two for an
+// emoji (a character from the emoji planes, or any character followed by the
+// emoji selector U+FE0F), one for any other character. Terminals disagree
+// about some of them, which is why the width can be set.
+func SymbolWidth(sym string) int {
+	w := 0
+	rs := []rune(sym)
+	for i, r := range rs {
+		switch {
+		case r == 0xFE0F || r == 0x200D || (r >= 0x300 && r < 0x370):
+			// no column of its own
+		case r >= 0x1F000 || (i+1 < len(rs) && rs[i+1] == 0xFE0F):
+			w += 2
+		default:
+			w++
+		}
+	}
+	return w
+}
+
+// The two looks of an alert, swapped every blinkPeriod: black on yellow and
+// yellow on black, from the fixed part of the 256-color palette so that a
+// terminal theme can't change them.
+const (
+	alertOn     = "\x1b[1;38;5;16;48;5;220m"
+	alertOff    = "\x1b[1;38;5;220;48;5;16m"
+	blinkPeriod = 500 * time.Millisecond
+)
+
+// AlertPhase says which of the two looks an alert has at a moment.
+func AlertPhase(now time.Time) bool { return now.UnixMilli()/blinkPeriod.Milliseconds()%2 == 0 }
 
 // style is the SGR sequence that starts the bar.
 func (b BarInfo) style() string {
@@ -104,6 +143,23 @@ func (b BarInfo) Render(width int, now time.Time) string {
 	if start < l+2 || start+c > width-r-2 {
 		center, c, start = "", 0, 0
 	}
+	alert := b.Alert != ""
+	if alert { // what is waiting matters more than the uptime and the key hints
+		room := width - l - r - 2
+		if room < 12 {
+			right, r = "", 0
+			room = width - l - 1
+		}
+		prefix, pw := "", 0
+		if sym := clean(b.AlertSymbol); sym != "" {
+			prefix, pw = sym+" ", b.AlertSymbolWidth+1
+		}
+		text := fit(clean(b.Alert), max(room-pw, 0))
+		center = prefix + text
+		c = pw + utf8.RuneCountInString(text)
+		start = min(max((width-c)/2, l+1), width-r-1-c)
+		start = max(start, l)
+	}
 
 	var sb strings.Builder
 	sb.WriteString(b.style())
@@ -113,7 +169,15 @@ func (b BarInfo) Render(width int, now time.Time) string {
 	pos := l
 	if center != "" {
 		sb.WriteString(strings.Repeat(" ", start-pos))
-		sb.WriteString(center)
+		if alert {
+			look := alertOff
+			if AlertPhase(now) {
+				look = alertOn
+			}
+			sb.WriteString(look + center + b.style())
+		} else {
+			sb.WriteString(center)
+		}
 		pos = start + c
 	}
 	gap := width - r - pos

@@ -22,10 +22,14 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/approve"
 )
 
-// armDelay is how long a new prompt ignores keys. The person may be typing
+// DefaultGuard is how long a new prompt ignores keys. The person may be typing
 // to the program at the moment the prompt appears, and those keys must not
 // answer it.
-const armDelay = 500 * time.Millisecond
+const DefaultGuard = 500 * time.Millisecond
+
+// DefaultIdle is how long the person must have stopped typing before a prompt
+// takes over the screen.
+const DefaultIdle = 5 * time.Second
 
 // holdLimit caps the output kept back while a prompt is on screen.
 const holdLimit = 4 << 20
@@ -48,6 +52,18 @@ type AttachOptions struct {
 	Project   string      // shown on the bar
 	Colors    Colors      // of the bar; zero means DefaultColors
 	LogPath   string      // if set, a record of what is sent to the terminal and what is typed
+
+	// A prompt that arrives while the person is typing does not take over the
+	// screen: the bar blinks, and the prompt opens when they have been idle for
+	// Idle (zero: always at once) or press the Info key. A new prompt then
+	// ignores keys for Guard (zero: DefaultGuard).
+	Idle  time.Duration
+	Guard time.Duration
+
+	// AlertSymbol is drawn before the text of the bar's alert (empty: none) and
+	// takes AlertSymbolWidth columns on the terminal.
+	AlertSymbol      string
+	AlertSymbolWidth int
 }
 
 // Attach connects the terminal in/out to the session at sock until the
@@ -80,7 +96,10 @@ func Attach(sock string, in, out *os.File, o AttachOptions) (Result, error) {
 	}
 	c := &client{conn: conn, in: in, out: out, detach: o.Detach, scr: scr, log: tlog,
 		info: o.Info, settings: o.Settings, theme: o.ThemeName,
-		bar: BarInfo{Project: o.Project, Key: o.Detach.Name, InfoKey: o.Info.Name, Started: time.Now(), Colors: o.Colors}}
+		idleFor: o.Idle, guard: o.Guard,
+		bar: BarInfo{Project: o.Project, Key: o.Detach.Name, InfoKey: o.Info.Name, Started: time.Now(), Colors: o.Colors,
+			AlertSymbol: o.AlertSymbol, AlertSymbolWidth: o.AlertSymbolWidth}}
+
 	defer func() {
 		c.emit(c.leaveOverlayBytes())
 		c.emit(c.tracker.Reset())
@@ -140,6 +159,20 @@ type client struct {
 	overlay *overlay
 	held    []byte // output kept back while an overlay is up
 	lost    bool   // some of it was dropped
+
+	idleFor time.Duration // how long the person must not have typed before a prompt opens
+	guard   time.Duration // how long a prompt that opened ignores keys
+
+	lastKey   time.Time // when the person last typed to the program
+	pending   *pending  // a prompt the person has not seen yet
+	lastPhase bool      // the look of the alert as last drawn
+}
+
+// pending is a prompt held back because the person is typing.
+type pending struct {
+	id      uint32
+	payload []byte
+	alert   string // what the bar says about it
 }
 
 type overlay struct {
@@ -229,6 +262,18 @@ func (c *client) run(winch <-chan os.Signal) (Result, error) {
 				c.feedOverlay(k)
 				continue
 			}
+			if !isFocusReport(k) {
+				c.lastKey = time.Now()
+			}
+			if c.pending != nil && c.info.Name != "" {
+				if i := c.info.find(k); i >= 0 { // the key that shows the settings shows the waiting prompt
+					if i > 0 {
+						c.sendInput(k[:i])
+					}
+					c.openPending()
+					continue
+				}
+			}
 			if i := c.detach.find(k); i >= 0 {
 				if i > 0 {
 					c.sendInput(k[:i])
@@ -272,10 +317,17 @@ func (c *client) run(winch <-chan os.Signal) (Result, error) {
 					c.drawBar(true)
 				}
 			case fPrompt:
-				c.startOverlay(f.payload)
+				c.onPrompt(f.payload)
 			case fCancel:
-				if len(f.payload) == 4 && c.overlay != nil && c.overlay.id == binary.BigEndian.Uint32(f.payload) {
+				if len(f.payload) != 4 {
+					break
+				}
+				id := binary.BigEndian.Uint32(f.payload)
+				if c.overlay != nil && c.overlay.id == id {
 					c.overlay.cancel()
+				}
+				if c.pending != nil && c.pending.id == id {
+					c.setPending(nil)
 				}
 			case fExit:
 				if len(f.payload) == 4 {
@@ -305,6 +357,81 @@ func (c *client) output(p []byte) {
 	c.held = append(c.held, p...)
 }
 
+func (c *client) guardOrDefault() time.Duration {
+	if c.guard > 0 {
+		return c.guard
+	}
+	return DefaultGuard
+}
+
+// isFocusReport reports whether typed bytes are only the terminal saying that
+// its window gained or lost focus, which is not typing.
+func isFocusReport(k []byte) bool {
+	return string(k) == "\x1b[I" || string(k) == "\x1b[O"
+}
+
+// onPrompt shows a prompt from the server, at once if the person is not typing,
+// else it waits and the bar says so.
+func (c *client) onPrompt(payload []byte) {
+	if len(payload) < 8 {
+		return
+	}
+	var req approve.Request
+	if json.Unmarshal(payload[8:], &req) != nil {
+		c.startOverlay(payload) // it answers the malformed request itself
+		return
+	}
+	if c.overlay == nil && time.Since(c.lastKey) >= c.idleFor {
+		c.startOverlay(payload)
+		return
+	}
+	c.setPending(&pending{id: binary.BigEndian.Uint32(payload[0:4]), payload: payload, alert: c.alertText(req)})
+}
+
+// alertText is the bar's message for a waiting prompt: what it is, and the key
+// that opens it.
+func (c *client) alertText(req approve.Request) string {
+	what := ""
+	switch {
+	case req.Kind == approve.KindNetwork && req.Net != nil:
+		host := req.Net.IP
+		if len(req.Net.Names) > 0 {
+			host = req.Net.Names[0]
+		}
+		what = fmt.Sprintf("Network %s:%d", host, req.Net.Port)
+	case req.Kind == approve.KindBuild:
+		what = "Build"
+	default:
+		what = strings.TrimSpace("Command " + req.Name + " " + strings.Join(req.Args, " "))
+	}
+	text := what
+	if c.info.Name != "" {
+		text += "  " + c.info.Name
+	}
+	return text
+}
+
+// setPending holds a prompt back (or, with nil, lets go of it) and updates the bar.
+func (c *client) setPending(p *pending) {
+	c.pending = p
+	c.bar.Alert = ""
+	if p != nil {
+		c.bar.Alert = p.alert
+	}
+	c.drawBar(true)
+}
+
+// openPending shows the waiting prompt now.
+func (c *client) openPending() {
+	p := c.pending
+	if p == nil {
+		return
+	}
+	c.pending = nil
+	c.bar.Alert = ""
+	c.startOverlay(p.payload)
+}
+
 // startOverlay draws a prompt over everything and starts reading its answer.
 // The terminal first goes back to its normal modes (no mouse reports, no
 // extended keys that would arrive as escape sequences and count as Esc), then
@@ -326,8 +453,9 @@ func (c *client) startOverlay(payload []byte) {
 	// Whatever was typed before the prompt appeared must not answer it.
 	_ = unix.IoctlSetInt(int(c.in.Fd()), unix.TCFLSH, unix.TCIFLUSH)
 	ctx, cancel := context.WithCancel(context.Background())
-	o := &overlay{id: id, cancel: cancel, keys: make(chan byte, 64), armed: time.Now().Add(armDelay), done: make(chan answerMsg, 1)}
+	o := &overlay{id: id, cancel: cancel, keys: make(chan byte, 64), armed: time.Now().Add(c.guardOrDefault()), done: make(chan answerMsg, 1)}
 	c.overlay = o
+	c.send(fOpened, binary.BigEndian.AppendUint32(nil, id)) // its timeout starts now
 
 	c.emit(c.tracker.Reset())
 	// The alternate screen first, so it saves the program's cursor; the scroll
@@ -495,6 +623,7 @@ func (c *client) drawBar(force bool) {
 		return
 	}
 	c.lastDraw = time.Now()
+	c.lastPhase = AlertPhase(c.lastDraw)
 	c.lastBar = c.bar.Render(c.scr.cols, c.lastDraw)
 	c.emitString(c.scr.Draw(c.lastBar))
 }
@@ -503,6 +632,15 @@ func (c *client) drawBar(force bool) {
 // and refreshes the uptime when the program is quiet.
 func (c *client) idle() {
 	now := time.Now()
+	if c.pending != nil && c.overlay == nil {
+		switch {
+		case now.Sub(c.lastKey) >= c.idleFor:
+			c.openPending()
+			return
+		case c.scr.Active() && AlertPhase(now) != c.lastPhase:
+			c.drawBar(true) // the alert blinks
+		}
+	}
 	if now.Sub(c.lastOutput) > 150*time.Millisecond {
 		if b := c.scr.FlushOut(); len(b) > 0 && c.overlay == nil {
 			c.emit(b)

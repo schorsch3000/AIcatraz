@@ -54,7 +54,7 @@ type Options struct {
 // Launch builds the image if needed and runs the jail. It returns the exit
 // code of the command inside the container.
 func Launch(o Options) (int, error) {
-	cfg, problems, err := config.LoadFile(o.ConfigPath, config.Options{})
+	cfg, problems, err := config.Load(o.ConfigPath, config.Options{})
 	if err != nil {
 		return 0, err
 	}

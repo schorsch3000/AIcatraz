@@ -22,6 +22,7 @@ const (
 	fDetach = 'D' // the user detached
 	fAnswer = 'A' // id u32, answer text: the user answered a prompt
 	fRedraw = 'W' // ask the program to repaint
+	fOpened = 'U' // id u32: the prompt is on screen now, so its timeout starts
 	fStop   = 'S' // first frame instead of fHello: end the session
 )
 

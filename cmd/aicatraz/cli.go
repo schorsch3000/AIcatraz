@@ -189,7 +189,7 @@ func cli(args []string, stdout, stderr io.Writer) int {
 }
 
 func configCheck(file string, stdout, stderr io.Writer) int {
-	_, problems, err := config.LoadFile(file, config.Options{})
+	_, problems, err := config.Load(file, config.Options{})
 	if err != nil {
 		ui.Error(stderr, "%v", err)
 		return 2

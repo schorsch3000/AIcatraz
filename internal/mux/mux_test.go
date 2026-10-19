@@ -224,7 +224,7 @@ func TestPromptAnsweredOnTheClientAndKeysDoNotReachTheProgram(t *testing.T) {
 	tm.expect("deploy")
 
 	tm.type_("y") // inside the arm delay: ignored
-	time.Sleep(armDelay + 200*time.Millisecond)
+	time.Sleep(DefaultGuard + 200*time.Millisecond)
 	select {
 	case r := <-got:
 		t.Fatalf("a key typed before the prompt was armed answered it: %+v", r)
@@ -262,7 +262,7 @@ func TestPromptWaitsForAClientAndTimesOutWithoutOne(t *testing.T) {
 	time.Sleep(300 * time.Millisecond) // queued, nobody to show it to
 	tm := attach(t, s)
 	tm.expect("waiting-cmd")
-	time.Sleep(armDelay + 100*time.Millisecond)
+	time.Sleep(DefaultGuard + 100*time.Millisecond)
 	tm.type_("y")
 	if a := <-got; a != approve.AllowOnce {
 		t.Errorf("answer %v", a)
@@ -357,7 +357,7 @@ func TestNetworkPromptThroughTheSession(t *testing.T) {
 	}()
 	tm.expect("OUT OF THE JAIL")
 	tm.expect("github.com")
-	time.Sleep(armDelay + 200*time.Millisecond)
+	time.Sleep(DefaultGuard + 200*time.Millisecond)
 	tm.type_("e, 443\rp") // edit the ports, then remember
 	r := <-got
 	if r.Verb != approve.VerbRemember || r.Ports != "22, 443" || r.Target != "github.com" {
@@ -503,4 +503,108 @@ func TestInfoKeyShowsTheSettingsAndDoesNotReachTheProgram(t *testing.T) {
 	tm.type_("y\r")
 	tm.expect("got:y")
 	tm.result()
+}
+
+// A prompt that arrives while the person types waits: the bar blinks, the
+// screen is not taken, and nothing typed answers it. It opens once they have
+// been idle, and its timeout starts then.
+func TestPromptWaitsWhileTypingAndOpensWhenIdle(t *testing.T) {
+	s := startSession(t, `while read l; do echo "typed:$l"; done`)
+	tm := attachWith(t, s, AttachOptions{Detach: DefaultKey, Info: InfoKey, Bar: BarBottom, Project: "proj", Idle: time.Second})
+	tm.type_("a\r")
+	tm.expect("typed:a")
+
+	ap := &Approver{Sock: filepath.Join(s.dir, ApproveSock)}
+	got := make(chan approve.Answer, 1)
+	go func() {
+		a, _ := ap.Ask(context.Background(), approve.Request{Kind: approve.KindNetwork, Net: &approve.NetInfo{IP: "1.2.3.4", Port: 443, Names: []string{"example.org"}}}, 30*time.Second)
+		got <- a
+	}()
+	tm.expect("Network example.org:443") // the bar says so
+	tm.expect("Ctrl-Q")
+	if strings.Contains(tm.screen(), "ON THE HOST") || strings.Contains(tm.screen(), "OUT OF THE JAIL") {
+		t.Fatal("the prompt opened while the person was typing")
+	}
+
+	// Typing goes on, to the program, and keeps the prompt away.
+	for i := 0; i < 8; i++ {
+		tm.type_("y\r")
+		time.Sleep(250 * time.Millisecond)
+	}
+	select {
+	case a := <-got:
+		t.Fatalf("typing answered the prompt: %v", a)
+	default:
+	}
+	tm.expect("typed:y")
+
+	// Idle: it opens, and ignores keys for the guard.
+	tm.expect("OUT OF THE JAIL")
+	tm.type_("y")
+	select {
+	case a := <-got:
+		t.Fatalf("a key inside the guard answered the prompt: %v", a)
+	case <-time.After(DefaultGuard + 200*time.Millisecond):
+	}
+	tm.type_("n")
+	select {
+	case a := <-got:
+		if a != approve.Deny {
+			t.Errorf("answer %v", a)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the prompt never took the answer")
+	}
+	s.stop()
+}
+
+func TestInfoKeyOpensAWaitingPrompt(t *testing.T) {
+	s := startSession(t, `while read l; do echo "typed:$l"; done`)
+	tm := attachWith(t, s, AttachOptions{Detach: DefaultKey, Info: InfoKey, Bar: BarBottom, Project: "proj", Idle: time.Minute})
+	tm.type_("a\r")
+	tm.expect("typed:a")
+	ap := &Approver{Sock: filepath.Join(s.dir, ApproveSock)}
+	got := make(chan approve.Answer, 1)
+	go func() {
+		a, _ := ap.Ask(context.Background(), approve.Request{Name: "make", Args: []string{"deploy"}}, 30*time.Second)
+		got <- a
+	}()
+	tm.expect("Command make deploy")
+	tm.type_(string([]byte{InfoKey.Byte()}))
+	tm.expect("ON THE HOST")
+	time.Sleep(DefaultGuard + 200*time.Millisecond)
+	tm.type_("d")
+	if a := <-got; a != approve.Deny {
+		t.Errorf("answer %v", a)
+	}
+	s.stop()
+}
+
+// The timeout counts from when the prompt is on screen, not from when it was asked.
+func TestPromptTimeoutStartsWhenItOpens(t *testing.T) {
+	s := startSession(t, `while read l; do echo "typed:$l"; done`)
+	tm := attachWith(t, s, AttachOptions{Detach: DefaultKey, Info: InfoKey, Bar: BarBottom, Project: "proj", Idle: 1500 * time.Millisecond})
+	tm.type_("a\r")
+	tm.expect("typed:a")
+	ap := &Approver{Sock: filepath.Join(s.dir, ApproveSock)}
+	start := time.Now()
+	type res struct {
+		a   approve.Answer
+		err error
+	}
+	got := make(chan res, 1)
+	go func() {
+		a, err := ap.Ask(context.Background(), approve.Request{Name: "slow"}, 2*time.Second)
+		got <- res{a, err}
+	}()
+	tm.expect("Command slow")
+	r := <-got
+	if r.err != approve.ErrTimeout {
+		t.Fatalf("%+v", r)
+	}
+	// 1.5 s held back + 2 s on screen, not 2 s from the request.
+	if d := time.Since(start); d < 3200*time.Millisecond {
+		t.Errorf("timed out after %v: the wait before it opened was counted", d)
+	}
+	s.stop()
 }

@@ -15,7 +15,7 @@ import (
 
 // loadForID loads the config just far enough to know the project.
 func loadForID(path string) (*config.Config, string, error) {
-	cfg, problems, err := config.LoadFile(path, config.Options{})
+	cfg, problems, err := config.Load(path, config.Options{})
 	if err != nil {
 		return nil, "", err
 	}

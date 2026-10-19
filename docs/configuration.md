@@ -8,17 +8,30 @@ image:      ...
 volumes:    [ ... ]
 env:        { static: {...}, from_host: [...] }
 sudo:       false
-bar:        { theme: forest, fg: white, bg: "#102030" }
+bar:        { theme: forest, fg: white, bg: "#102030", symbol: "⚠️", symbol_width: 2 }
 ports:      [ 3000, "8080:80" ]
 devices:    [ {serial: "usb-Arduino_*"}, {usb: "2e8a:*"}, {path: /dev/ttyUSB0} ]
 network:    off | open | { default: ask, dns: open, resolvers: [...], rules: [ ... ] }
 limits:     { pids: 1024, memory: 2g }
-approval:   { timeout: 2m }
+approval:   { timeout: 2m, idle: 5s, guard: 500ms }
 canary:     { action: stop, interval: 3s }
 global:     { env_strip: [...] }
 rules:      [ ... ]
 agent:      { tool: claude, version: latest, skip_permissions: true }
 ```
+
+## The user config
+
+Settings that are about you, not the project, can go into `~/.config/aicatraz/config.yaml` (or `$XDG_CONFIG_HOME/aicatraz/config.yaml`). It is read from the host and never mounted into a jail. It has the same format as the project's file, and may hold only `approval`, `canary`, `global`, `agent`, `limits`, `env`, `network` and `bar`; anything else (volumes, image, rules, ports, devices, `sudo`, `project`) is an error, so a setting you forgot about can't widen a jail.
+
+```yaml
+# ~/.config/aicatraz/config.yaml
+approval: { idle: 8s }
+bar: { theme: random, symbol: "⚠️", symbol_width: 2 }
+network: { default: ask }
+```
+
+A key the project's file sets wins over the user's, key by key (`approval.timeout` in the project, `approval.idle` from you). `network` is the exception: if the project has a `network` section (even `network: off`), it replaces yours as a whole. Problems in the user config are reported when a project config is loaded, with the file's path.
 
 ## `project`
 
@@ -195,9 +208,11 @@ bar:
   theme: brick          # a name from `aicatraz bar-colors`
   fg: white             # optional
   bg: "#102030"         # optional
+  symbol: "⚠️"          # drawn before the alert of a waiting prompt; "" for none
+  symbol_width: 2       # columns your terminal draws it in (default: a guess)
 ```
 
-The look of the status bar of `aicatraz up` sessions in this project, to tell terminals apart at a glance. All three keys are optional. `theme: random` takes a different named theme every time a session is attached. Colors are a name (`red`, `bright-blue`, `gray`), a number from 0 to 255, `#rrggbb`, or `default`. A flag overrides this, and this overrides the user's `AICATRAZ_BAR_*` variables, key by key. See [sessions.md](sessions.md#the-status-bar).
+The look of the status bar of `aicatraz up` sessions in this project, to tell terminals apart at a glance. All keys are optional. `theme: random` takes a different named theme every time a session is attached. Colors are a name (`red`, `bright-blue`, `gray`), a number from 0 to 255, `#rrggbb`, or `default`. `symbol` is what the alert of a waiting prompt starts with (default `⚠️`; any text up to 8 characters, or `""` for none), and `symbol_width` is how many columns your terminal draws it in, 0 to 4. Terminals disagree about emoji: some draw `⚠️` two columns wide, some one. If the bar's right edge is off by one while an alert shows, set `symbol_width` to what you see. Without it AIcatraz guesses: 2 for an emoji, 1 for any other character. A flag overrides this, and this overrides the user's `AICATRAZ_BAR_*` variables, key by key. See [sessions.md](sessions.md#the-status-bar).
 
 ## `limits`
 
@@ -212,7 +227,11 @@ The jail always drops all capabilities, sets `no-new-privileges`, and has a read
 
 | Key | Default | |
 |---|---|---|
-| `timeout` | `2m` | How long a prompt waits before it counts as a deny. 5 seconds to 1 hour. |
+| `timeout` | `2m` | How long a prompt waits before it counts as a deny, counted from when it is on your screen. 5 seconds to 1 hour. |
+| `idle` | `5s` | In `aicatraz up`: how long you must have stopped typing before a prompt takes over the screen. A prompt that comes while you type waits, and the status bar blinks a message such as `⚠️ Network github.com:443  Ctrl-Q`; it opens when you have been idle that long, or at once when you press the info key (`Ctrl-Q`). `0` opens every prompt at once. Up to 10 minutes. |
+| `guard` | `500ms` | How long a prompt that has just opened ignores keys. 100 milliseconds to 5 seconds. |
+
+A prompt that waits for you to stop typing is denied after 10 minutes at most, plus its `timeout`. The tmux popup and `--approval-tty` don't wait: they show the prompt at once.
 
 ## `canary`
 

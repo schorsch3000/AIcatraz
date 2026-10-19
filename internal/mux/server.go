@@ -51,6 +51,7 @@ func (c *clientConn) send(typ byte, payload []byte) error {
 type prompt struct {
 	id       uint32
 	req      approve.Request
+	timeout  time.Duration // how long the person has once the prompt is on screen
 	deadline time.Time
 	reply    chan string
 	timer    *time.Timer
@@ -251,6 +252,10 @@ func (s *server) handleClient(conn net.Conn) {
 			if len(p) >= 4 {
 				s.answer(c, binary.BigEndian.Uint32(p[:4]), string(p[4:]))
 			}
+		case fOpened:
+			if len(p) >= 4 {
+				s.opened(c, binary.BigEndian.Uint32(p[:4]))
+			}
 		case fRedraw:
 			go s.redraw()
 		}
@@ -386,7 +391,7 @@ func (s *server) handleApproval(conn net.Conn) {
 func (s *server) submit(req approve.Request, timeout time.Duration) *prompt {
 	s.mu.Lock()
 	s.nextID++
-	p := &prompt{id: s.nextID, req: req, deadline: time.Now().Add(timeout), reply: make(chan string, 1)}
+	p := &prompt{id: s.nextID, req: req, timeout: timeout, deadline: time.Now().Add(timeout), reply: make(chan string, 1)}
 	p.timer = time.AfterFunc(timeout, func() { s.finish(p, "timeout", true) })
 	s.queue = append(s.queue, p)
 	s.mu.Unlock()
@@ -438,15 +443,32 @@ func (s *server) dispatch() {
 	s.queue = s.queue[1:]
 	s.active = p
 	c := s.client
-	left := time.Until(p.deadline)
+	if !p.done {
+		// A client has it. Its timeout counts from when the prompt is on screen
+		// (see opened), and the client may hold it back while the person types.
+		p.deadline = time.Now().Add(p.timeout + PendingLimit)
+		p.timer.Reset(p.timeout + PendingLimit)
+	}
 	s.mu.Unlock()
 
 	body, _ := json.Marshal(p.req)
 	payload := make([]byte, 8, 8+len(body))
 	binary.BigEndian.PutUint32(payload[0:4], p.id)
-	binary.BigEndian.PutUint32(payload[4:8], uint32(max(left, 0).Milliseconds()))
+	binary.BigEndian.PutUint32(payload[4:8], uint32(p.timeout.Milliseconds()))
 	if c.send(fPrompt, append(payload, body...)) != nil {
 		s.detach(c)
+	}
+}
+
+// opened starts the timeout of the prompt the client has put on screen. The
+// client waits until the person has stopped typing before it does, so the time
+// spent waiting must not count against the person.
+func (s *server) opened(c *clientConn, id uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p := s.active; s.client == c && p != nil && p.id == id && !p.done {
+		p.deadline = time.Now().Add(p.timeout)
+		p.timer.Reset(p.timeout)
 	}
 }
 
@@ -486,6 +508,13 @@ func (s *server) cancelAll() {
 type Approver struct {
 	Sock string // the session's approve socket
 }
+
+// PendingLimit is how long a prompt may wait for the person to stop typing, on
+// top of its timeout, before it counts as unanswered.
+const PendingLimit = 10 * time.Minute
+
+// Wait is the time a prompt may wait to be shown, on top of its timeout.
+func (a *Approver) Wait() time.Duration { return PendingLimit }
 
 func (a *Approver) Ask(ctx context.Context, req approve.Request, timeout time.Duration) (approve.Answer, error) {
 	text, err := a.ask(ctx, req, timeout)

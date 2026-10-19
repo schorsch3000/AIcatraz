@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Approval prompts in `aicatraz up` no longer take over the screen while you type. A prompt that arrives while you are typing waits: the status bar blinks `⚠️ Network host:port  Ctrl-Q` (or `Command ...`), and the prompt opens after `approval.idle` (5s) without typing, or when you press Ctrl-Q. A prompt that opens still ignores keys for `approval.guard` (500ms), and its timeout now starts when it opens. `bar.symbol` and `bar.symbol_width` set the symbol in front of the message and the columns it takes.
+- New user config, `~/.config/aicatraz/config.yaml`, for `approval`, `canary`, `global`, `agent`, `limits`, `env`, `network` and `bar`. The project's file overrides it key by key; volumes, image, rules, ports, devices and sudo stay project-only.
 - The starter `aicatraz.yaml` written by `aicatraz init` now sets `project.id` (from the directory name), uses `network: {default: ask}` so every connection is asked about, and has an active `bar:` section with a theme drawn at random.
 - `aicatraz init dockerfile` adds a `RUN` line that upgrades the image's packages (`apt`, `dnf`, `yum`, `apk`, `pacman` or `zypper`, to match the distribution), with the install command commented out to extend.
 

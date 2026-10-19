@@ -12,6 +12,7 @@ import (
 
 	"github.com/schorsch3000/aicatraz/internal/devices"
 	"github.com/schorsch3000/aicatraz/internal/egress"
+	"github.com/schorsch3000/aicatraz/internal/mux"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
@@ -85,7 +86,32 @@ func (i *ImageSpec) UnmarshalYAML(n *yaml.Node) error {
 
 // Approval tunes the approval prompt for `ask` rules.
 type Approval struct {
-	Timeout string `yaml:"timeout"` // a Go duration such as "90s" or "2m"; default 2m
+	Timeout string `yaml:"timeout"` // a Go duration such as "90s" or "2m"; default 2m, counted from when the prompt opens
+	Idle    string `yaml:"idle"`    // how long you must have stopped typing before a prompt opens; default 5s, 0 opens at once
+	Guard   string `yaml:"guard"`   // how long a new prompt ignores keys; default 500ms
+}
+
+// Defaults of the `idle` and `guard` settings.
+const (
+	DefaultApprovalIdle  = 5 * time.Second
+	DefaultApprovalGuard = 500 * time.Millisecond
+)
+
+// IdleOrDefault returns how long the user must have been idle for a prompt to
+// open. Validation guarantees it parses.
+func (a Approval) IdleOrDefault() time.Duration {
+	if d, err := time.ParseDuration(a.Idle); err == nil && d >= 0 {
+		return d
+	}
+	return DefaultApprovalIdle
+}
+
+// GuardOrDefault returns how long a prompt that just opened ignores keys.
+func (a Approval) GuardOrDefault() time.Duration {
+	if d, err := time.ParseDuration(a.Guard); err == nil && d > 0 {
+		return d
+	}
+	return DefaultApprovalGuard
 }
 
 // DefaultApprovalTimeout is how long a prompt waits before it counts as a deny.
@@ -377,4 +403,25 @@ type BarStyle struct {
 	Theme string `yaml:"theme"` // a name from `aicatraz bar-colors`
 	FG    string `yaml:"fg"`    // text color: a name, 0-255, #rrggbb or default
 	BG    string `yaml:"bg"`    // background color
+	// Symbol is drawn before the bar's alert for a waiting prompt (default ⚠️;
+	// "" for none). SymbolWidth is how many columns your terminal draws it in
+	// (default: a guess, 2 for an emoji, 1 for other characters).
+	Symbol      *string `yaml:"symbol"`
+	SymbolWidth *int    `yaml:"symbol_width"`
+}
+
+// SymbolOrDefault returns the symbol of the bar's alert.
+func (b BarStyle) SymbolOrDefault() string {
+	if b.Symbol == nil {
+		return mux.DefaultAlertSymbol
+	}
+	return *b.Symbol
+}
+
+// SymbolWidthOrDefault returns the columns the alert's symbol takes.
+func (b BarStyle) SymbolWidthOrDefault() int {
+	if b.SymbolWidth != nil {
+		return *b.SymbolWidth
+	}
+	return mux.SymbolWidth(b.SymbolOrDefault())
 }

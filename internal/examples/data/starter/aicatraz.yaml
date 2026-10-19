@@ -144,7 +144,9 @@ sudo: false
 
 # How long an `ask` prompt waits before it counts as a deny (5s to 1h).
 # approval:
-#   timeout: 2m
+#   timeout: 2m                  # counted from when the prompt is on your screen
+#   idle: 5s                     # a prompt waits (the bar blinks) until you have stopped typing this long; 0: at once
+#   guard: 500ms                 # a new prompt ignores keys for this long
 
 # What happens when a hidden path turns out to be visible (say, replaced on the host):
 # stop the session (default), warn once, or off.
@@ -178,5 +180,7 @@ sudo: false
 # your AICATRAZ_BAR_* variables.
 bar:
   theme: {{THEME}}               # a name from `aicatraz bar-colors`, or `random`
+#   symbol: "⚠️"                 # before the alert of a waiting prompt; "" for none
+#   symbol_width: 2              # columns your terminal draws it in (default: a guess)
 #   fg: white                    # text color: a name, 0-255, #rrggbb or default
 #   bg: "#102030"                # background; fg and bg override the theme's
