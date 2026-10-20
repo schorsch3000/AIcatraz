@@ -24,8 +24,7 @@ func runInitDockerfile(args []string, stdout, stderr io.Writer) int {
 	force := false
 	for _, a := range args {
 		if a != "--force" {
-			fmt.Fprint(stderr, styledUsage(ui.For(stderr)))
-			return 2
+			return badArgs(stderr, unexpected("init", a))
 		}
 		force = true
 	}

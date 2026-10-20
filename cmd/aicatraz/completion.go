@@ -23,6 +23,7 @@ type cflag struct {
 // positional argument; later is the kind of every positional after that.
 type cverb struct {
 	name, desc string
+	args       string // the synopsis after the name, for `help <name>`
 	flags      []cflag
 	first      []string
 	later      string
@@ -47,6 +48,10 @@ var (
 	flagBarBG     = cflag{"", "bar-bg", "value", "background color of the status bar"}
 	flagNoSession = cflag{"", "no-session", "", "run the agent in this terminal, not as a session"}
 	flagTmux      = cflag{"", "tmux", "", "use a tmux session instead of the built-in one"}
+	flagSock      = cflag{"", "approval-sock", "file", "socket that answers approval prompts"}
+	flagFollow    = cflag{"f", "follow", "", "keep running and print new entries"}
+	flagLines     = cflag{"n", "lines", "value", "show only the last N entries (default 20; 0: all)"}
+	flagYes       = cflag{"y", "yes", "", "do not ask, remove what is listed"}
 )
 
 // agentFlags are the flags of the verbs that start an agent: they run as a
@@ -54,28 +59,33 @@ var (
 var agentFlags = []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagNoSession, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG}
 
 var completionVerbs = []cverb{
-	{name: "up", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagAgent, flagResume}},
-	{name: "bar-colors", desc: "show the status bar in every color theme"},
-	{name: "down", desc: "stop the session of this project", flags: []cflag{flagConfig}},
-	{name: "run", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagAgent, flagResume}},
-	{name: "shell", desc: "open another shell in the running jail", flags: []cflag{flagConfig}},
-	{name: "claude", desc: "start Claude Code in the jail", flags: agentFlags},
-	{name: "opencode", desc: "start opencode in the jail", flags: agentFlags},
-	{name: "agent", desc: "start the agent named in the config", flags: agentFlags},
-	{name: "sessions", desc: "list the agent sessions of this project", flags: []cflag{flagConfig}},
-	{name: "resume", desc: "continue an agent session", flags: append(append([]cflag{}, agentFlags...), flagPick)},
-	{name: "tools", desc: "manage the cached agent executables", flags: []cflag{flagFromHst}, first: []string{"list", "install", "update"}, later: "tool"},
-	{name: "devices", desc: "list USB devices and what the jail gets", flags: []cflag{flagConfig}},
-	{name: "network", desc: "show or change the network rules", flags: []cflag{flagConfig, {"", "ports", "value", "ports to allow or deny"}, {"", "all", "", "forget every remembered rule"}}, first: []string{"list", "allow", "deny", "forget"}},
-	{name: "pins", desc: "list or forget approved file versions", flags: []cflag{flagConfig, {"", "all", "", "forget every pin"}, {"", "missing", "", "forget pins of files that are gone"}}, first: []string{"list", "diff", "forget"}, later: "file"},
-	{name: "init", desc: "write a starter config or Dockerfile.az", flags: []cflag{
+	{name: "up", args: "[flags] [-- command...]", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagAgent, flagResume}},
+	{name: "bar-colors", args: "", desc: "show the status bar in every color theme"},
+	{name: "down", args: "[flags]", desc: "stop the session of this project", flags: []cflag{flagConfig}},
+	{name: "run", args: "[flags] [-- command...]", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagSock, flagBuild, flagAgent, flagResume}},
+	{name: "shell", args: "[flags] [-- command...]", desc: "open another shell in the running jail", flags: []cflag{flagConfig, flagPrint}},
+	{name: "claude", args: "[flags] [-- agent arguments...]", desc: "start Claude Code in the jail", flags: agentFlags},
+	{name: "opencode", args: "[flags] [-- agent arguments...]", desc: "start opencode in the jail", flags: agentFlags},
+	{name: "agent", args: "[flags] [-- agent arguments...]", desc: "start the agent named in the config", flags: agentFlags},
+	{name: "sessions", args: "[flags]", desc: "list the agent sessions of this project", flags: []cflag{flagConfig}},
+	{name: "resume", args: "[flags] [id] [--pick]", desc: "continue an agent session", flags: append(append([]cflag{}, agentFlags...), flagPick)},
+	{name: "status", args: "", desc: "list the running jails of all projects"},
+	{name: "log", args: "[flags]", desc: "show the audit log of this project", flags: []cflag{flagConfig, flagFollow, flagLines}},
+	{name: "doctor", args: "[flags]", desc: "check that Docker and the rest are in order", flags: []cflag{flagConfig}},
+	{name: "clean", args: "[flags]", desc: "remove state of projects whose directory is gone", flags: []cflag{flagYes}},
+	{name: "tools", args: "[list | install <tool> [version] [--from-host] | update [tool...]]", desc: "manage the cached agent executables", flags: []cflag{flagFromHst}, first: []string{"list", "install", "update"}, later: "tool"},
+	{name: "devices", args: "[flags]", desc: "list USB devices and what the jail gets", flags: []cflag{flagConfig}},
+	{name: "network", args: "[flags] list | allow|deny <host|ip|cidr|*> [--ports 22,443,8000-8080|*] | forget <number> | --all", desc: "show or change the network rules", flags: []cflag{flagConfig, {"", "ports", "value", "ports to allow or deny"}, {"", "all", "", "forget every remembered rule"}}, first: []string{"list", "allow", "deny", "forget"}},
+	{name: "pins", args: "[flags] list | diff [<path>...] | forget <path>... | --missing | --all", desc: "list or forget approved file versions", flags: []cflag{flagConfig, {"", "all", "", "forget every pin"}, {"", "missing", "", "forget pins of files that are gone"}}, first: []string{"list", "diff", "forget"}, later: "file"},
+	{name: "init", args: "[--example name] [--list] [--force] | dockerfile [--force]", desc: "write a starter config or Dockerfile.az", flags: []cflag{
 		{"e", "example", "example", "starter to write"},
 		{"", "list", "", "list the starters"},
 		{"", "force", "", "overwrite existing files"},
 	}, first: []string{"dockerfile"}},
-	{name: "config", desc: "validate a config", first: []string{"check"}, later: "file"},
-	{name: "version", desc: "print the version"},
-	{name: "help", desc: "show the usage"},
+	{name: "config", args: "check [-c] [file]", desc: "validate a config", flags: []cflag{flagConfig}, first: []string{"check"}, later: "file"},
+	{name: "completion", args: "bash|zsh|fish", desc: "print shell completion code to source", first: completionShells},
+	{name: "version", args: "", desc: "print the version"},
+	{name: "help", args: "[command]", desc: "show the usage, or the flags of one command", first: nil},
 }
 
 // completionPrograms are the names the scripts register for.
@@ -161,7 +171,7 @@ func bashCompletion() string {
 	w("        [ \"${COMP_WORDS[i]}\" = \"--\" ] && return\n")
 	w("    done\n")
 	w("    case \"$prev\" in\n")
-	w("    -c | --config | --approval-tty)\n")
+	w("    -c | --config | --approval-tty | --approval-sock)\n")
 	w("        compopt -o filenames 2>/dev/null\n")
 	w("        COMPREPLY=($(compgen -f -- \"$cur\"))\n")
 	w("        return ;;\n")
@@ -177,7 +187,7 @@ func bashCompletion() string {
 	w("    --bar-theme)\n")
 	w("        COMPREPLY=($(compgen -W %q -- \"$cur\"))\n", strings.Join(themeNames(), " "))
 	w("        return ;;\n")
-	w("    --resume | --detach-key | --info-key | --bar-fg | --bar-bg | --ports)\n")
+	w("    --resume | --detach-key | --info-key | --bar-fg | --bar-bg | --ports | -n | --lines)\n")
 	w("        return ;;\n")
 	w("    esac\n")
 	w("    if [[ $cur == -* ]]; then\n")
@@ -194,7 +204,7 @@ func bashCompletion() string {
 	w("    for ((i = 2; i < COMP_CWORD; i++)); do\n")
 	w("        word=${COMP_WORDS[i]}\n")
 	w("        case \"$word\" in\n")
-	w("        -c | --config | --approval-tty | --agent | --resume | --status-bar | --bar-theme | --bar-fg | --bar-bg | --detach-key | --info-key | --ports | -e | --example) ((i++)) ;;\n")
+	w("        -c | --config | --approval-tty | --approval-sock | --agent | --resume | --status-bar | --bar-theme | --bar-fg | --bar-bg | --detach-key | --info-key | --ports | -n | --lines | -e | --example) ((i++)) ;;\n")
 	w("        -*) ;;\n")
 	w("        *) ((npos++)) ;;\n")
 	w("        esac\n")

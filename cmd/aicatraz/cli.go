@@ -4,10 +4,10 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -28,56 +28,41 @@ import (
 
 const defaultConfig = "aicatraz.yaml"
 
-const usage = `usage:
-  aicatraz up [-c file] [--print] [--tmux] [--detach-key key] [--info-key key] [--approve-build] [-- command...]
-              [--status-bar bottom|off] [--bar-theme name] [--bar-fg color] [--bar-bg color]
-                                 start the jail as a session that keeps running when you
-                                 detach (Ctrl-Y; or --detach-key ctrl-<key>, or
-                                 $AICATRAZ_DETACH_KEY; Ctrl-Q shows the session's settings, or
-                                 --info-key ctrl-<key|off>, $AICATRAZ_INFO_KEY), with a
-                                 status bar on the bottom row (colors: see bar-colors); approval prompts for 'ask'
-                                 rules appear over the screen; attaches if it already runs
-  aicatraz down [-c file]        stop the session of this project
-  aicatraz bar-colors            show the status bar in every color theme
-  aicatraz run [-c file] [--print] [--approval-tty dev] [-- command...]
-                                 start the jail in this terminal (default: an
-                                 interactive shell); --print shows the docker
-                                 commands and changes nothing
-  aicatraz shell [-c file] [-- command...]
-                                 open another shell in the running jail
-  aicatraz claude|opencode [flags] [-- agent arguments...]
-                                 start a coding agent in the jail (installed on first
-                                 use, with your configuration copied in); in a terminal it
-                                 runs as an up session (flags as for up, --no-session to
-                                 run it directly)
-  aicatraz agent [flags] [-- agent arguments...]
-                                 start the agent named by agent.tool in the config
-  aicatraz sessions              list the agent sessions of this project
-  aicatraz resume [flags] [id] [--pick]
-                                 continue the latest (or the given) agent session
-  aicatraz devices [-c file]     list the USB devices of this machine, and which the config
-                                 hands to the jail
-  aicatraz network [-c file] list
-                                 show the network rules and the remembered ones
-  aicatraz network [-c file] allow|deny <host|ip|cidr|*> [--ports 22,443,8000-8080|*]
-  aicatraz network [-c file] forget <number> | --all
-                                 change the remembered rules (also in a running session)
-  aicatraz pins [-c file] list   show the files whose approved version is remembered
-  aicatraz pins [-c file] diff [<path>...]
-                                 show what changed in pinned files since they were approved
-  aicatraz pins [-c file] forget <path>... | --missing | --all
-                                 forget pins; the next run asks again
-  aicatraz tools [list | install <tool> [version] [--from-host] | update [tool...]]
-                                 manage the cached agent executables
-  aicatraz init [--example name] [--list] [--force]
-                                 write a starter ` + defaultConfig + ` (and Dockerfile.az) here
-  aicatraz init dockerfile [--force]
-                                 write a Dockerfile.az (FROM the distribution
-                                 this machine runs)
-  aicatraz completion bash|zsh|fish
-                                 print shell completion code to source
-  aicatraz config check [file]   validate a config (default: ` + defaultConfig + `)
-  aicatraz version
+const usage = `usage: {prog} <command> [flags]      ({prog} help <command> lists the flags of a command)
+
+Start a jail
+  run [-- cmd...]            the jail in this terminal (default: a shell)
+  up [-- cmd...]             the jail as a session you can detach from (Ctrl-Y) and re-attach to
+  claude | opencode          start that coding agent in the jail (as a session, in a terminal)
+  agent                      start the agent named by agent.tool in the config
+  resume [id] [--pick]       continue the latest (or the given) agent session
+  shell [-- cmd...]          another shell in the running jail
+  down                       stop the session of this project
+
+Look and change
+  status                     the running jails of all projects
+  log [-f] [-n N]            the audit log: what the agent asked for, and what was decided
+  sessions                   the agent sessions of this project
+  network list|allow|deny|forget
+                             the network rules, and the ones remembered from prompts
+  pins list|diff|forget      files whose approved version is remembered
+  devices                    USB devices of this machine, and which the config hands over
+  tools [list|install|update]
+                             the cached agent executables
+
+Set up and maintain
+  init [--example name]      write a starter ` + defaultConfig + ` here (--list shows the starters)
+  init dockerfile            write a Dockerfile.az for the distribution this machine runs
+  config check [file]        validate a config (default: ` + defaultConfig + `)
+  doctor                     check that Docker and the rest are in order
+  clean                      remove state of projects whose directory is gone
+  bar-colors                 show the status bar in every color theme
+  completion bash|zsh|fish   print shell completion code to source
+  version
+
+Commands that use a project take -c <file> to name the config (default: ` + defaultConfig + `).
+Exit codes: 0 ok; 1 config problems; 2 anything else; run, up and the agents pass on the
+exit code of the program they ran.
 `
 
 func runCLI(args []string) int {
@@ -90,7 +75,30 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
-	case "version", "--version":
+	case "--help", "-h":
+		args = []string{"help"}
+	case "--version":
+		args = []string{"version"}
+	}
+	if v := findVerb(args[0]); v != nil && args[0] != "help" && args[0] != "completion" {
+		norm, err := normalizeArgs(v, args[1:])
+		if errors.Is(err, errHelp) {
+			printVerbHelp(stdout, v)
+			return 0
+		}
+		if err != nil {
+			return badArgs(stderr, err)
+		}
+		args = append([]string{args[0]}, norm...)
+		if needsConfig[args[0]] {
+			if err := checkConfigExists(args[1:]); err != nil {
+				ui.Error(stderr, "%v", err)
+				return 2
+			}
+		}
+	}
+	switch args[0] {
+	case "version":
 		fmt.Fprintf(stdout, "aicatraz %s (%s/%s, %s)\n", version, runtime.GOOS, runtime.GOARCH, runtime.Version())
 		return 0
 	case "run", "up", "down", "shell", "claude", "opencode", "agent", "resume":
@@ -129,9 +137,9 @@ func cli(args []string, stdout, stderr io.Writer) int {
 	case "completion":
 		return runCompletion(args[1:], stdout, stderr)
 	case "sessions":
-		file := defaultConfig
-		if len(args) == 3 && (args[1] == "-c" || args[1] == "--config") {
-			file = args[2]
+		file, _ := configArg(args[1:])
+		if len(args) > 1 && args[1] != "--config" {
+			return badArgs(stderr, unexpected("sessions", args[1]))
 		}
 		if err := jail.ListSessions(file, stdout); err != nil {
 			ui.Error(stderr, "%v", err)
@@ -173,19 +181,27 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		}
 		return cli(args[2:], stdout, stderr)
 	case "config":
-		if len(args) >= 2 && args[1] == "check" && len(args) <= 3 {
-			file := defaultConfig
-			if len(args) == 3 {
-				file = args[2]
-			}
-			return configCheck(file, stdout, stderr)
+		file, named := configArg(args[1:])
+		rest := args[1:]
+		if named {
+			rest = rest[2:]
 		}
-	case "help", "--help", "-h":
-		fmt.Fprint(stdout, styledUsage(ui.For(stdout)))
-		return 0
+		if len(rest) == 0 || rest[0] != "check" {
+			return badArgs(stderr, &usageError{"config", "config needs a sub-command: check"})
+		}
+		switch {
+		case len(rest) > 2:
+			return badArgs(stderr, unexpected("config", rest[2]))
+		case len(rest) == 2 && named:
+			return badArgs(stderr, &usageError{"config", "name the file once, as -c <file> or as an argument"})
+		case len(rest) == 2:
+			file = rest[1]
+		}
+		return configCheck(file, stdout, stderr)
+	case "help":
+		return runHelp(args[1:], stdout, stderr)
 	}
-	fmt.Fprint(stderr, styledUsage(ui.For(stderr)))
-	return 2
+	return badArgs(stderr, unknownCommand(args[0]))
 }
 
 func configCheck(file string, stdout, stderr io.Writer) int {
@@ -276,8 +292,7 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 			opts.Resume = a // a session id
 			args = args[1:]
 		default:
-			fmt.Fprint(stderr, styledUsage(ui.For(stderr)))
-			return 2
+			return badArgs(stderr, unexpected(verb, a))
 		}
 	}
 	if opts.Agent != "" || agentVerb {
@@ -363,54 +378,37 @@ func chooseSession(opts jail.Options, pick bool, in io.Reader, stderr io.Writer)
 	return jail.FindSession(opts.ConfigPath, fields[3])
 }
 
-var (
-	usageVerb = regexp.MustCompile(`^(  \S+ )([a-z|]+)`)
-	usageFlag = regexp.MustCompile(`(\s|\[)(--?[a-z][a-z-]*)`)
-)
-
-var usageGap = regexp.MustCompile(`(\S)( {2,})(\S)`)
-
-// renameUsage swaps the program name in the usage text for ui.Prog, widening
-// the description gap on a line so the descriptions stay aligned.
-func renameUsage(text string) string {
-	diff := len("aicatraz") - len(ui.Prog)
-	if diff == 0 {
-		return text
-	}
-	lines := strings.Split(text, "\n")
-	for i, l := range lines {
-		if !strings.HasPrefix(l, "  aicatraz ") {
-			continue
-		}
-		l = "  " + ui.Prog + l[len("  aicatraz"):]
-		if diff > 0 {
-			l = usageGap.ReplaceAllString(l, "${1}${2}"+strings.Repeat(" ", diff)+"${3}")
-		}
-		lines[i] = l
-	}
-	return strings.Join(lines, "\n")
+// usageText is the usage with the name the program was started under.
+func usageText() string {
+	return strings.ReplaceAll(usage, "{prog}", ui.Prog)
 }
 
-// styledUsage colors the usage text: command names bold cyan, flags yellow,
+// styledUsage colors the usage text: headings bold, command names bold cyan,
 // descriptions dimmed.
 func styledUsage(st ui.Style) string {
-	text := renameUsage(usage)
+	text := usageText()
 	if !st.Enabled() {
 		return text
 	}
 	var b strings.Builder
-	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+	for i, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		body := strings.TrimLeft(line, " ")
 		switch {
-		case line == "usage:":
-			b.WriteString(st.Bold(line))
-		case strings.HasPrefix(line, "  "+ui.Prog+" "):
-			line = usageFlag.ReplaceAllStringFunc(line, func(m string) string {
-				return m[:1] + st.Yellow(m[1:])
-			})
-			line = usageVerb.ReplaceAllString(line, "$1"+st.BoldCyan("$2"))
+		case i == 0 || line == "":
 			b.WriteString(line)
+		case strings.HasPrefix(line, "Commands that") || strings.HasPrefix(line, "Exit codes") || strings.HasPrefix(line, "exit code"):
+			b.WriteString(st.Dim(line))
+		case !strings.HasPrefix(line, " "):
+			b.WriteString(st.Bold(line))
+		case len(line)-len(body) > 2: // a description continued from the line above
+			b.WriteString(st.Dim(line))
 		default:
-			b.WriteString(st.Dim(line)) // continuation lines describe the command above
+			name, rest, found := strings.Cut(body, "   ")
+			b.WriteString("  " + st.BoldCyan(name))
+			if found {
+				desc := strings.TrimLeft(rest, " ")
+				b.WriteString(strings.Repeat(" ", 3+len(rest)-len(desc)) + st.Dim(desc))
+			}
 		}
 		b.WriteString("\n")
 	}

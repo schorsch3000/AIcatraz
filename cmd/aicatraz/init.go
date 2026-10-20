@@ -33,8 +33,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 			name = args[1]
 			args = args[2:]
 		default:
-			fmt.Fprint(stderr, styledUsage(ui.For(stderr)))
-			return 2
+			return badArgs(stderr, unexpected("init", a))
 		}
 	}
 	st := ui.For(stdout)
