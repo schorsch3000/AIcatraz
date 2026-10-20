@@ -398,7 +398,7 @@ func TestInteractiveTerminalThroughTheBroker(t *testing.T) {
 	p.write("aicatraz.yaml", "project: {id: it-interactive}\nvolumes:\n  - ~/p:rw\nrules:\n  - command: hostname\n    decision: allow\n  - command: read\n    decision: deny\n")
 	hostName, _ := os.Hostname()
 
-	cmd := exec.Command(bin, "run", "--", "sh", "-c", `read line; echo "got:$line"; hostname`)
+	cmd := exec.Command(bin, "run", "--no-session", "--", "sh", "-c", `read line; echo "got:$line"; hostname`)
 	cmd.Dir = p.dir
 	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"), "XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
 	ptmx, err := pty.Start(cmd)
@@ -826,7 +826,7 @@ func TestBuildFilesNeedApprovalBeforeBuilding(t *testing.T) {
 	}
 
 	// In a terminal the launcher shows the diff and asks.
-	cmd := exec.Command(bin, "run", "--", "true")
+	cmd := exec.Command(bin, "run", "--no-session", "--", "true")
 	cmd.Dir = p.dir
 	cmd.Env = append(os.Environ(), "HOME="+p.home, "DOCKER_CONFIG="+filepath.Join(realHome(), ".docker"),
 		"XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)

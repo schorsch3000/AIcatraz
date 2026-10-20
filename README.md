@@ -56,7 +56,7 @@ aicatraz config check        # checks it and warns about things that look unwise
 aicatraz run                 # a shell in the jail
 ```
 
-You are now in a Debian container as yourself, with the project at the same path as on your machine and nothing else. Try `ls ~`: it is empty, which is the point. Network connections from the jail show up as prompts for you to allow or refuse (in `run` they need `--approval-tty`; in `up` they appear over the screen).
+You are now in a Debian container as yourself, with the project at the same path as on your machine and nothing else. Try `ls ~`: it is empty, which is the point. Network connections from the jail show up as prompts for you to allow or refuse (they appear over the screen; with `--no-session` or without a terminal they need `--approval-tty`).
 
 Then add a rule so the agent can do one useful thing on your machine, and see what happens when it asks:
 
@@ -92,7 +92,7 @@ Which one do I want? **`claude`** or **`opencode`** to work with an agent, **`up
 
 | | |
 |---|---|
-| `aicatraz run [-- cmd]` | The jail in this terminal. |
+| `aicatraz run [-- cmd]` | The jail in this terminal. In a terminal it runs as an `up` session; `--no-session` runs it directly. |
 | `aicatraz up` | The jail as a session you can detach from (`Ctrl-Y`) and come back to with `up`. `down` stops it. |
 | `aicatraz claude`, `opencode`, `resume` | Agents. In a terminal they run as an `up` session. |
 | `aicatraz config check` | Validate the config and lint it. |

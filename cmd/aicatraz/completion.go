@@ -46,7 +46,7 @@ var (
 	flagTheme     = cflag{"", "bar-theme", "theme", "color theme of the status bar"}
 	flagBarFG     = cflag{"", "bar-fg", "value", "text color of the status bar"}
 	flagBarBG     = cflag{"", "bar-bg", "value", "background color of the status bar"}
-	flagNoSession = cflag{"", "no-session", "", "run the agent in this terminal, not as a session"}
+	flagNoSession = cflag{"", "no-session", "", "run in this terminal, not as a session"}
 	flagTmux      = cflag{"", "tmux", "", "use a tmux session instead of the built-in one"}
 	flagSock      = cflag{"", "approval-sock", "file", "socket that answers approval prompts"}
 	flagFollow    = cflag{"f", "follow", "", "keep running and print new entries"}
@@ -62,7 +62,7 @@ var completionVerbs = []cverb{
 	{name: "up", args: "[flags] [-- command...]", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagAgent, flagResume}},
 	{name: "bar-colors", args: "", desc: "show the status bar in every color theme"},
 	{name: "down", args: "[flags]", desc: "stop the session of this project", flags: []cflag{flagConfig}},
-	{name: "run", args: "[flags] [-- command...]", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagSock, flagBuild, flagAgent, flagResume}},
+	{name: "run", args: "[flags] [-- command...]", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagSock, flagBuild, flagAgent, flagResume, flagNoSession, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG}},
 	{name: "shell", args: "[flags] [-- command...]", desc: "open another shell in the running jail", flags: []cflag{flagConfig, flagPrint}},
 	{name: "claude", args: "[flags] [-- agent arguments...]", desc: "start Claude Code in the jail", flags: agentFlags},
 	{name: "opencode", args: "[flags] [-- agent arguments...]", desc: "start opencode in the jail", flags: agentFlags},

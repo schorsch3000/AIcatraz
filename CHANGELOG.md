@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `aicatraz run` in a terminal now runs as an `up` session, like the agent commands: status bar, detach, and approval prompts over the screen. `--no-session` runs it directly as before; without a terminal, or with `--approval-tty`, it always does.
+
 ## 0.5.1 (2026-10-20)
 
 - Fix (possibly): Shift+Enter could submit the prompt instead of adding a line after a popup. The session now follows keyboard flags that a program sets (`CSI = flags u`) as well as pushes, and restores them when a popup closes.

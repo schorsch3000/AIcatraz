@@ -251,7 +251,7 @@ func configCheck(file string, stdout, stderr io.Writer) int {
 func launch(verb string, args []string, stdout, stderr io.Writer) int {
 	opts := jail.Options{ConfigPath: defaultConfig, Stdout: stdout, Stderr: stderr}
 	agentVerb := verb == "claude" || verb == "opencode" || verb == "agent" || verb == "resume"
-	sessionVerb := verb == "up" || agentVerb // verbs that can run as a session you can detach from
+	sessionVerb := verb == "up" || verb == "run" || agentVerb // verbs that can run as a session you can detach from
 	noSession := false
 	switch verb {
 	case "claude", "opencode":
@@ -291,7 +291,7 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		case a == "--status-bar" && len(args) >= 2 && sessionVerb:
 			opts.StatusBar = args[1]
 			args = args[2:]
-		case a == "--no-session" && agentVerb:
+		case a == "--no-session" && (agentVerb || verb == "run"):
 			noSession = true
 			args = args[1:]
 		case a == "--tmux" && verb == "up":
@@ -354,10 +354,11 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		opts.Command = rest
 		code, err = jail.Shell(opts)
 	default:
-		// An agent runs as a session (you can detach, and approval prompts have
-		// somewhere to appear) unless that is switched off, there is no terminal
-		// to attach, or you named a terminal for the prompts yourself.
-		if agentVerb && !noSession && opts.ApprovalTTY == "" && isTerminalPair(stdout) {
+		// An agent, and `run`, run as a session (you can detach, and approval
+		// prompts have somewhere to appear) unless that is switched off, there is
+		// no terminal to attach, or you named a terminal or a socket for the
+		// prompts yourself. A session starts its program with `run --approval-sock`.
+		if (agentVerb || verb == "run") && !noSession && opts.ApprovalTTY == "" && opts.ApprovalSock == "" && isTerminalPair(stdout) {
 			code, err = jail.Up(opts)
 		} else {
 			code, err = jail.Launch(opts)
