@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0 (2026-10-20)
+
+- The image build uses `Dockerfile.az.dockerignore`, the ignore file docker reads for `Dockerfile.az`. The hidden-path check, the build-file pinning and the offer to add missing paths all use it; a plain `.dockerignore` is no longer checked.
+- `aicatraz init` writes an empty `Dockerfile.az.dockerignore` (an existing one is kept).
+- A project with a `Dockerfile.az` and a `.dockerignore` but no `Dockerfile.az.dockerignore` is asked, in a terminal, whether to rename the `.dockerignore` or create a blank `Dockerfile.az.dockerignore`. This covers `run`, `up` and the agent commands. Without a terminal nothing is asked or changed.
+
 ## 0.6.1 (2026-10-20)
 
 - With the `rainbow` theme a waiting prompt no longer blinks the bar's message; the rainbow turns (once around in 4 seconds) until the prompt opens.
