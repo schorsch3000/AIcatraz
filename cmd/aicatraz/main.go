@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/schorsch3000/aicatraz/internal/devices"
+	"github.com/schorsch3000/aicatraz/internal/jail"
 	"github.com/schorsch3000/aicatraz/internal/shim"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
@@ -26,12 +28,12 @@ func main() {
 // name is a proxied command and runs as the shim.
 // Inside a jail (the broker socket is mounted) "az" stays a proxied command,
 // so a rule for the Azure CLI keeps working. "aicatraz" and release names
-// refuse to run inside a jail.
+// refuse to run inside a jail, except for the internal commands in runsInJail.
 func run(name string, args []string) int {
 	if isReleaseName(name) {
 		name = "aicatraz"
 	}
-	if name == "aicatraz" && insideJail() {
+	if name == "aicatraz" && insideJail() && !runsInJail(args) {
 		fmt.Fprintln(os.Stderr, "aicatraz: refusing to run inside a jail")
 		return 1
 	}
@@ -40,6 +42,13 @@ func run(name string, args []string) int {
 		return runCLI(args)
 	}
 	return runShim(name, args)
+}
+
+// runsInJail reports whether args are one of the two internal commands the
+// launcher runs inside the jail with `docker exec`: the hidden-path check and
+// the device node maker. They must not be refused with the rest of the CLI.
+func runsInJail(args []string) bool {
+	return len(args) > 0 && (args[0] == jail.CanaryCommand || args[0] == devices.NodeCommand)
 }
 
 // isReleaseName reports whether name is the file name of a release binary.

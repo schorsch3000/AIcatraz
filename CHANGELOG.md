@@ -2,6 +2,8 @@
 
 ## 0.4.0 (2026-10-20)
 
+- Fix: since 0.3.1 the hidden-path check and the device node maker did nothing. The change that makes the CLI refuse to run inside a jail also refused the two internal commands the launcher runs inside it, so a hidden file that became visible was not noticed, and device nodes were not made. Those two commands are allowed again.
+- CI now runs the integration tests (real containers). Two of them were out of date and are fixed.
 - Command line: every flag is checked against one table per command. A mistake now names the flag and the command (`unknown flag --x for aicatraz up`) and points to `aicatraz help up`, instead of printing the whole usage. `aicatraz help [command]` and `<command> --help` list the flags of a command and never read a config. `--flag=value` works for long flags, `-c file` works the same on every command (including `config check`), and unknown commands suggest the closest name.
 - The usage text is shorter and grouped; flags that it left out (`--agent`, `--resume`, `--approval-tty`, `--approval-sock`, `--no-session`) are in `help <command>`. Exit codes are documented.
 - A missing `aicatraz.yaml` now says to run `aicatraz init` or use `-c`, instead of `open aicatraz.yaml: no such file or directory`.

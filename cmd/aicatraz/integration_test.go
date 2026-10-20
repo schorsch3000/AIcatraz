@@ -228,8 +228,9 @@ func TestExitCodePassesThrough(t *testing.T) {
 func TestShimBinaryRunsOnAlpine(t *testing.T) {
 	p := newProject(t)
 	p.write("aicatraz.yaml", "image: alpine:3\nvolumes:\n  - ~/p:rw\n")
-	stdout, stderr, code := p.run("sh", "-c", "/aicatraz/aicatraz version; whoami; echo $HOME")
-	if code != 0 || !strings.Contains(stdout, "aicatraz") || !strings.Contains(stdout, p.home) {
+	// The static binary starts on Alpine (musl); inside a jail the CLI refuses on purpose.
+	stdout, stderr, code := p.run("sh", "-c", "/aicatraz/aicatraz version 2>&1; echo refused-rc=$?; whoami; echo $HOME")
+	if code != 0 || !strings.Contains(stdout, "refusing to run inside a jail") || !strings.Contains(stdout, "refused-rc=1") || !strings.Contains(stdout, p.home) {
 		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
 	}
 }
@@ -964,7 +965,8 @@ func TestClaudeRunsInTheJailWithYourConfig(t *testing.T) {
 		"CONFIG_DIR: " + real,
 		"/aicatraz/bin:/aicatraz/tools:",
 		`SETTINGS: {"theme":"dark"}`,
-		`TOPLEVEL: {"hasCompletedOnboarding":true}`,
+		`"hasCompletedOnboarding": true`,
+		`"hasTrustDialogAccepted": true`, // the workspace is marked as trusted in the jail's copy
 		"SKILL: say hello",
 		"CREDMODE: 600",
 		"PARENT_WRITABLE: yes",

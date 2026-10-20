@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/schorsch3000/aicatraz/internal/devices"
+	"github.com/schorsch3000/aicatraz/internal/jail"
 	"github.com/schorsch3000/aicatraz/internal/shim"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
@@ -94,6 +96,14 @@ func TestDispatch(t *testing.T) {
 	for _, n := range []string{"aicatraz", "aicatraz-v0.1.1-linux-amd64"} {
 		if code := run(n, []string{"version"}); code == 0 {
 			t.Errorf("%s inside a jail should refuse, got exit 0", n)
+		}
+		// The launcher runs these two inside the jail (docker exec): the hidden-path
+		// check and the device node maker. Refusing them switches the canary off.
+		if code := run(n, []string{jail.CanaryCommand}); code != 0 {
+			t.Errorf("%s %s inside a jail must run, got exit %d", n, jail.CanaryCommand, code)
+		}
+		if msg := stderrOf(t, func() { run(n, []string{devices.NodeCommand}) }); strings.Contains(msg, "refusing") {
+			t.Errorf("%s %s inside a jail must run, not be refused: %s", n, devices.NodeCommand, msg)
 		}
 	}
 }
@@ -246,4 +256,19 @@ func TestNewCommandsRejectStrayArguments(t *testing.T) {
 	if code := cli([]string{"log", "--lines=5"}, &out, &errb); code != 0 {
 		t.Errorf("log --lines=5: exit %d %s", code, errb.String())
 	}
+}
+
+// stderrOf returns what f writes to os.Stderr.
+func stderrOf(t *testing.T, f func()) string {
+	t.Helper()
+	old := os.Stderr
+	defer func() { os.Stderr = old }()
+	file, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = file
+	f()
+	b, _ := os.ReadFile(file.Name())
+	return string(b)
 }

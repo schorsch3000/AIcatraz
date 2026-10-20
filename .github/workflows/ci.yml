@@ -11,3 +11,15 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: make build
+
+  # Starts real containers (docker is on the runner); the tests skip what the
+  # machine lacks, such as serial adapters.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -tags integration -count=1 -timeout 25m ./cmd/aicatraz
