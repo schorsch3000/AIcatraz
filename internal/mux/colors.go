@@ -14,7 +14,10 @@ import (
 
 // Colors are the SGR parameters of the bar's text and background colors, for
 // example "38;5;255" and "48;5;18".
-type Colors struct{ FG, BG string }
+type Colors struct {
+	FG, BG  string
+	Rainbow bool // the background is a gradient across the bar; BG is only the fallback
+}
 
 // ParseColor reads a color and returns its SGR parameters, for the text
 // (background false) or the background:
@@ -95,6 +98,10 @@ var Themes = []Theme{
 	{"amber", "16", "214", "black on amber, hard to miss"},
 	{"gold", "16", "220", "black on yellow"},
 	{"mint", "16", "121", "black on light green"},
+	{"lime", "16", "118", "black on lime green, loud"},
+	{"coral", "16", "210", "black on coral"},
+	{"rose", "16", "218", "black on light pink"},
+	{"ocean", "231", "24", "white on deep sea blue"},
 	{"sky", "17", "153", "dark blue on light blue"},
 	{"lavender", "16", "183", "black on light purple"},
 	{"light", "16", "252", "black on light gray, for light terminals"},
@@ -103,7 +110,12 @@ var Themes = []Theme{
 	{"github-dark", "#c9d1d9", "#161b22", "true color: GitHub dark"},
 	{"dracula", "#f8f8f2", "#44475a", "true color: Dracula"},
 	{"gruvbox", "#ebdbb2", "#3c3836", "true color: Gruvbox"},
+	{RainbowTheme, "16", "#ffe066", "true color: black on a rainbow gradient (contrast of its yellow)"},
 }
+
+// RainbowTheme is the theme whose background runs through the colors of the
+// rainbow instead of being one color. Setting a background turns that off.
+const RainbowTheme = "rainbow"
 
 // DefaultTheme is the theme used when none is chosen.
 const DefaultTheme = "forest"
@@ -163,6 +175,7 @@ func ResolveTheme(theme, fg, bg string) (Colors, string, error) {
 	if fg == "" {
 		fg = t.FG
 	}
+	bgSet := bg
 	if bg == "" {
 		bg = t.BG
 	}
@@ -174,7 +187,7 @@ func ResolveTheme(theme, fg, bg string) (Colors, string, error) {
 	if err != nil {
 		return Colors{}, "", err
 	}
-	return Colors{FG: f, BG: b}, name, nil
+	return Colors{FG: f, BG: b, Rainbow: name == RainbowTheme && bgSet == ""}, name, nil
 }
 
 // palette256 returns the RGB of a color of the xterm 256-color palette.

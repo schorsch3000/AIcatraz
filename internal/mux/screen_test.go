@@ -391,3 +391,29 @@ func TestRandomTheme(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
+
+func TestRainbowTheme(t *testing.T) {
+	c, err := ResolveColors("rainbow", "", "")
+	if err != nil || !c.Rainbow {
+		t.Fatalf("rainbow: %+v %v", c, err)
+	}
+	now := time.Now()
+	bar := BarInfo{Project: "p", Colors: c, Started: now}.Render(60, now)
+	plain := visibleText(bar)
+	if n := len([]rune(plain)); n != 60 {
+		t.Errorf("a rainbow bar is as wide as the terminal: %d columns", n)
+	}
+	if !strings.Contains(bar, "\x1b[48;2;255;107;107m") || !strings.Contains(bar, "\x1b[48;2;177;151;252m") {
+		t.Errorf("the gradient runs from red to violet: %q", bar)
+	}
+	if c, _ := ResolveColors("rainbow", "", "#102030"); c.Rainbow {
+		t.Error("a background of your own turns the gradient off")
+	}
+	if c, _ := ResolveColors("lime", "", ""); c.Rainbow || c.BG != "48;5;118" {
+		t.Errorf("lime: %+v", c)
+	}
+	alert := BarInfo{Project: "p", Colors: c, Started: now, Alert: "waiting"}.Render(60, now)
+	if !strings.Contains(alert, "waiting") {
+		t.Errorf("alert lost: %q", alert)
+	}
+}

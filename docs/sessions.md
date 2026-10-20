@@ -6,7 +6,7 @@
 
 `aicatraz up` keeps the bottom row of your terminal for a status bar: the project on the left, what runs and for how long in the middle (if there is room), and the detach key on the right. The program inside is told the terminal has one row less, and a scroll region keeps its output above the bar. It is a thin layer, not a terminal emulator; it is tested with vim and a shell. `--status-bar off` (or `AICATRAZ_STATUS_BAR=off`) turns it off, and is the first thing to try if something draws wrongly.
 
-The bar is white on dark green (`forest`) by default. `aicatraz bar-colors` shows it in 18 ready-made themes (with their contrast, so you can see which are easy to read). `random` is not a theme but a draw: every time a session is attached it takes a different one of the others (so a re-attach may look different). Choose one, or set the colors yourself:
+The bar is white on dark green (`forest`) by default. `aicatraz bar-colors` shows it in 23 ready-made themes (with their contrast, so you can see which are easy to read). `random` is not a theme but a draw: every time a session is attached it takes a different one of the others (so a re-attach may look different). Choose one, or set the colors yourself:
 
 ```bash
 aicatraz up --bar-theme charcoal

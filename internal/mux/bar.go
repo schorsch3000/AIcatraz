@@ -4,6 +4,7 @@ package mux
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -187,5 +188,63 @@ func (b BarInfo) Render(width int, now time.Time) string {
 	sb.WriteString(strings.Repeat(" ", gap))
 	sb.WriteString(right)
 	sb.WriteString("\x1b[0m")
+	if b.Colors.Rainbow {
+		return rainbow(sb.String(), width)
+	}
+	return sb.String()
+}
+
+// rainbowStops are the colors of the rainbow theme, light enough for black text.
+var rainbowStops = [][3]int{{255, 107, 107}, {255, 169, 77}, {255, 224, 102}, {105, 219, 124}, {102, 217, 232}, {116, 167, 255}, {177, 151, 252}}
+
+// rainbowAt is the background of a column: the stops spread over the width.
+func rainbowAt(col, width int) string {
+	pos := 0.0
+	if width > 1 {
+		pos = float64(col) / float64(width-1) * float64(len(rainbowStops)-1)
+	}
+	i := min(int(pos), len(rainbowStops)-2)
+	f := pos - float64(i)
+	a, z := rainbowStops[i], rainbowStops[i+1]
+	mix := func(k int) int { return a[k] + int(math.Round(float64(z[k]-a[k])*f)) }
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", mix(0), mix(1), mix(2))
+}
+
+// rainbow gives every column of a rendered bar its own background, leaving
+// an alert, which has colors of its own, alone.
+func rainbow(bar string, width int) string {
+	var sb strings.Builder
+	col, last, alert := 0, "", false
+	for i := 0; i < len(bar); {
+		if bar[i] == 0x1b && i+1 < len(bar) && bar[i+1] == '[' {
+			j := i + 2
+			for j < len(bar) && (bar[j] < 0x40 || bar[j] > 0x7e) {
+				j++
+			}
+			j = min(j+1, len(bar))
+			seq := bar[i:j]
+			switch seq {
+			case alertOn, alertOff:
+				alert = true
+			default:
+				if strings.HasPrefix(seq, "\x1b[0;") {
+					alert, last = false, "" // the bar's own style came back and reset the background
+				}
+			}
+			sb.WriteString(seq)
+			i = j
+			continue
+		}
+		_, n := utf8.DecodeRuneInString(bar[i:])
+		if !alert {
+			if bg := rainbowAt(col, width); bg != last {
+				sb.WriteString(bg)
+				last = bg
+			}
+		}
+		sb.WriteString(bar[i : i+n])
+		col++
+		i += n
+	}
 	return sb.String()
 }
