@@ -112,6 +112,9 @@ func Launch(o Options) (int, error) {
 		var ask func(IgnoreGap) bool
 		if !o.Print && isTerminal(os.Stdin) && isTerminal(os.Stderr) {
 			ask = askIgnore(os.Stdin, os.Stderr)
+			if err := MigrateIgnore(*img.Build, askMigrate(os.Stdin, os.Stderr)); err != nil {
+				return 0, err
+			}
 		}
 		if err := EnsureHiddenIgnored(*img.Build, hidden, ask); err != nil {
 			return 0, err

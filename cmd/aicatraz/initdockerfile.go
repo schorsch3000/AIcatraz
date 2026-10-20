@@ -18,6 +18,9 @@ var osReleasePath = "/etc/os-release"
 
 const dockerfileName = "Dockerfile.az"
 
+// ignoreFileName is the ignore file docker reads for it (BuildKit).
+const ignoreFileName = dockerfileName + ".dockerignore"
+
 // runInitDockerfile writes a short Dockerfile.az whose base image matches
 // the distribution this machine runs, with a line that upgrades its packages.
 func runInitDockerfile(args []string, stdout, stderr io.Writer) int {

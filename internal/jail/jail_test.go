@@ -458,7 +458,7 @@ func TestBuildFiles(t *testing.T) {
 	write("Dockerfile.az", "FROM debian\nCOPY app.conf /etc/\nCOPY src /app\nCOPY ../outside /x\n")
 	write("app.conf", "x")
 	write("src/main.go", "package main")
-	write(".dockerignore", ".env\n")
+	write("Dockerfile.az.dockerignore", ".env\n")
 	write("outside", "x")
 	b := Build{Dockerfile: filepath.Join(ctx, "Dockerfile.az"), Context: ctx}
 	var rel []string
@@ -467,7 +467,7 @@ func TestBuildFiles(t *testing.T) {
 		rel = append(rel, r)
 	}
 	// The Dockerfile, the ignore file and the single COPY'd file; not the copied directory.
-	if !slices.Equal(rel, []string{".dockerignore", "Dockerfile.az", "app.conf"}) {
+	if !slices.Equal(rel, []string{"Dockerfile.az", "Dockerfile.az.dockerignore", "app.conf"}) {
 		t.Errorf("%v", rel)
 	}
 }

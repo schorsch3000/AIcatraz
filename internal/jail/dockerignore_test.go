@@ -60,7 +60,7 @@ func TestCheckHidden(t *testing.T) {
 	if err := CheckHidden(b, []string{outside}); err != nil {
 		t.Errorf("hidden path outside the context needs nothing: %v", err)
 	}
-	if err := CheckHidden(b, hidden); err == nil || !strings.Contains(err.Error(), "no .dockerignore") {
+	if err := CheckHidden(b, hidden); err == nil || !strings.Contains(err.Error(), "no Dockerfile.az.dockerignore") {
 		t.Errorf("missing .dockerignore must fail, got %v", err)
 	}
 
@@ -69,23 +69,55 @@ func TestCheckHidden(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(".dockerignore", ".env\n")
+	write("Dockerfile.az.dockerignore", ".env\n")
 	if err := CheckHidden(b, hidden); err == nil || !strings.Contains(err.Error(), "secrets") {
 		t.Errorf("partial exclusion must fail naming the leak, got %v", err)
 	}
-	write(".dockerignore", ".env\nsecrets\n")
+	write("Dockerfile.az.dockerignore", ".env\nsecrets\n")
 	if err := CheckHidden(b, hidden); err != nil {
 		t.Errorf("full exclusion should pass: %v", err)
 	}
 
-	// A Dockerfile-specific ignore file may take precedence in BuildKit, so it must pass too.
-	write("Dockerfile.az.dockerignore", "node_modules\n")
-	if err := CheckHidden(b, hidden); err == nil || !strings.Contains(err.Error(), "Dockerfile.az.dockerignore") {
-		t.Errorf("Dockerfile-specific ignore that leaks must fail, got %v", err)
-	}
-	write("Dockerfile.az.dockerignore", ".env\nsecrets\n")
+	// docker's own .dockerignore is not what the launcher checks.
+	write(".dockerignore", "node_modules\n")
 	if err := CheckHidden(b, hidden); err != nil {
-		t.Errorf("both files excluding should pass: %v", err)
+		t.Errorf("a plain .dockerignore must not matter: %v", err)
+	}
+}
+
+func TestMigrateIgnore(t *testing.T) {
+	ctx := t.TempDir()
+	b := Build{Dockerfile: filepath.Join(ctx, "Dockerfile.az"), Context: ctx}
+	az := IgnorePath(b)
+
+	os.Remove(az)
+	old := filepath.Join(ctx, ".dockerignore")
+	ask := func(a string) func(string, string) string { return func(string, string) string { return a } }
+	if err := MigrateIgnore(b, ask("rename")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(az); err == nil {
+		t.Error("nothing to migrate without a .dockerignore")
+	}
+	os.WriteFile(old, []byte("x\n"), 0o644)
+	MigrateIgnore(b, ask(""))
+	if _, err := os.Stat(az); err == nil {
+		t.Error("declined must change nothing")
+	}
+	MigrateIgnore(b, ask("create"))
+	if got, err := os.ReadFile(az); err != nil || len(got) != 0 {
+		t.Errorf("create: %q %v", got, err)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Error("create must keep .dockerignore")
+	}
+	os.Remove(az)
+	MigrateIgnore(b, ask("rename"))
+	if got, _ := os.ReadFile(az); string(got) != "x\n" {
+		t.Errorf("rename: %q", got)
+	}
+	if _, err := os.Stat(old); err == nil {
+		t.Error("rename must move .dockerignore")
 	}
 }
 
@@ -93,14 +125,14 @@ func TestEnsureHiddenIgnored(t *testing.T) {
 	ctx := t.TempDir()
 	b := Build{Dockerfile: filepath.Join(ctx, "Dockerfile.az"), Context: ctx}
 	hidden := []string{filepath.Join(ctx, ".env"), filepath.Join(ctx, "aicatraz.yaml")}
-	ignore := filepath.Join(ctx, ".dockerignore")
+	ignore := filepath.Join(ctx, "Dockerfile.az.dockerignore")
 
 	// Without a way to ask, nothing is touched and the build is refused.
 	if err := EnsureHiddenIgnored(b, hidden, nil); err == nil {
 		t.Fatal("must refuse without asking")
 	}
 	if _, err := os.Stat(ignore); err == nil {
-		t.Fatal(".dockerignore created without asking")
+		t.Fatal("Dockerfile.az.dockerignore created without asking")
 	}
 
 	// Every path is asked about; a no leaves it out, and the refusal stays.
@@ -115,7 +147,7 @@ func TestEnsureHiddenIgnored(t *testing.T) {
 		t.Errorf("asked = %+v (the file is created by the first yes, so the second sees it)", asked)
 	}
 	if got, _ := os.ReadFile(ignore); string(got) != ".env\n" {
-		t.Errorf(".dockerignore = %q", got)
+		t.Errorf("Dockerfile.az.dockerignore = %q", got)
 	}
 
 	// Next time it asks again, and a yes completes the job without touching existing lines.
@@ -126,7 +158,7 @@ func TestEnsureHiddenIgnored(t *testing.T) {
 		t.Fatalf("all yes should pass: %v", err)
 	}
 	if got, _ := os.ReadFile(ignore); string(got) != "node_modules\n.env\naicatraz.yaml\n" {
-		t.Errorf(".dockerignore = %q", got)
+		t.Errorf("Dockerfile.az.dockerignore = %q", got)
 	}
 	asked = nil
 	if err := EnsureHiddenIgnored(b, hidden, ask); err != nil || len(asked) != 0 {
@@ -137,7 +169,7 @@ func TestEnsureHiddenIgnored(t *testing.T) {
 func TestAskIgnoreOnlyAYesCounts(t *testing.T) {
 	for in, want := range map[string]bool{"y\n": true, "YES\n": true, "\n": false, "n\n": false, "yep\n": false, "": false} {
 		var out bytes.Buffer
-		got := askIgnore(strings.NewReader(in), &out)(IgnoreGap{File: "/p/.dockerignore", Rel: ".env"})
+		got := askIgnore(strings.NewReader(in), &out)(IgnoreGap{File: "/p/Dockerfile.az.dockerignore", Rel: ".env"})
 		if got != want {
 			t.Errorf("input %q: got %v", in, got)
 		}
@@ -147,7 +179,24 @@ func TestAskIgnoreOnlyAYesCounts(t *testing.T) {
 	}
 	// Input after the answer's newline stays unread.
 	r := strings.NewReader("y\nrest")
-	askIgnore(r, io.Discard)(IgnoreGap{File: "/p/.dockerignore", Rel: ".env", Exists: true})
+	askIgnore(r, io.Discard)(IgnoreGap{File: "/p/Dockerfile.az.dockerignore", Rel: ".env", Exists: true})
+	if r.Len() != len("rest") {
+		t.Errorf("read past the answer: %d bytes left", r.Len())
+	}
+}
+
+func TestAskMigrateAnswers(t *testing.T) {
+	for in, want := range map[string]string{"r\n": "rename", "RENAME\n": "rename", "c\n": "create", "Create\n": "create", "\n": "", "n\n": "", "x\n": "", "": ""} {
+		var out bytes.Buffer
+		if got := askMigrate(strings.NewReader(in), &out)("/p/.dockerignore", "/p/Dockerfile.az.dockerignore"); got != want {
+			t.Errorf("input %q: got %q, want %q", in, got, want)
+		}
+		if !strings.Contains(out.String(), "Dockerfile.az.dockerignore") || !strings.Contains(out.String(), "/p/.dockerignore") {
+			t.Errorf("question should name both files: %s", out.String())
+		}
+	}
+	r := strings.NewReader("r\nrest")
+	askMigrate(r, io.Discard)("/p/.dockerignore", "/p/Dockerfile.az.dockerignore")
 	if r.Len() != len("rest") {
 		t.Errorf("read past the answer: %d bytes left", r.Len())
 	}

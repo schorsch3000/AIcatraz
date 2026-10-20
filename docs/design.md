@@ -87,7 +87,7 @@ Presets are a starting point; for commands outside the table you write the list 
 - There is a small window between hashing and the executed program reading the file. The broker re-hashes immediately before `exec`, which closes the long gap but not the tiny one. For stronger guarantees, mount the pinned files `ro` (e.g. `~/git/myproject/Makefile:ro`); then the agent can't change them at all and the pin store is just a backstop.
 - A file in a hidden path can **not** be a dependency: the broker would otherwise read it and put its content into a prompt. Such a rule is denied.
 
-**The image build is pinned the same way.** The files that define it (`Dockerfile.az`, the ignore files, and single files named by `COPY`/`ADD`) are checked before the launcher builds. If one is new or changed, the launcher shows the diff and asks on its own terminal (the agent isn't running yet), with `y` build once, `p` build and remember, `n` cancel. Without a terminal it refuses and says so; `--approve-build` pins non-interactively. Directories copied wholesale (`COPY . /app`) are not pinned, since that is the project's own code, which the agent legitimately edits.
+**The image build is pinned the same way.** The files that define it (`Dockerfile.az`, `Dockerfile.az.dockerignore`, and single files named by `COPY`/`ADD`) are checked before the launcher builds. If one is new or changed, the launcher shows the diff and asks on its own terminal (the agent isn't running yet), with `y` build once, `p` build and remember, `n` cancel. Without a terminal it refuses and says so; `--approve-build` pins non-interactively. Directories copied wholesale (`COPY . /app`) are not pinned, since that is the project's own code, which the agent legitimately edits.
 
 ### The linter
 

@@ -93,6 +93,15 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// An empty ignore file for the image build; an existing one is kept.
+	if _, err := os.Lstat(ignoreFileName); err != nil {
+		if err := os.WriteFile(ignoreFileName, nil, 0o644); err != nil {
+			ui.Error(stderr, "%v", err)
+			return 2
+		}
+		fmt.Fprintf(stdout, "%s %s\n", st.BoldGreen("wrote"), ignoreFileName)
+	}
+
 	// The example must be a valid config; say so if it somehow isn't.
 	_, problems, err := config.LoadFile(examples.ConfigFile, config.Options{})
 	if err == nil {

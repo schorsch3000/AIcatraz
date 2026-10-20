@@ -50,3 +50,22 @@ func readLine(r io.Reader) string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// askMigrate returns the question asked when a project has a .dockerignore
+// but no <dockerfile>.dockerignore. Answers: "rename", "create", or "" for neither.
+func askMigrate(in io.Reader, out io.Writer) func(old, new string) string {
+	st := ui.For(out)
+	return func(old, new string) string {
+		fmt.Fprintf(out, "%s the build uses %s, but this project only has %s.\n", st.BoldYellow(ui.Prog+":"), st.Bold(filepath.Base(new)), st.Bold(old))
+		fmt.Fprintf(out, "  [r]ename it to %s, create a blank %s and keep it, or [N]either? [r/c/N] ", st.Bold(filepath.Base(new)), st.Bold(filepath.Base(new)))
+		ans := strings.ToLower(readLine(in))
+		fmt.Fprintln(out)
+		switch ans {
+		case "r", "rename":
+			return "rename"
+		case "c", "create":
+			return "create"
+		}
+		return ""
+	}
+}

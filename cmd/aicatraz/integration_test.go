@@ -293,12 +293,12 @@ func TestBuildRefusesLeakingContext(t *testing.T) {
 	p.removeImage("it-leak")
 
 	_, stderr, code := p.run("true")
-	if code == 0 || !strings.Contains(stderr, ".dockerignore") {
+	if code == 0 || !strings.Contains(stderr, "Dockerfile.az.dockerignore") {
 		t.Fatalf("build must be refused (exit %d): %s", code, stderr)
 	}
 
 	// With the exclusion in place the build goes through and the image has no .env.
-	p.write(".dockerignore", ".env\nDockerfile.az\n")
+	p.write("Dockerfile.az.dockerignore", ".env\nDockerfile.az\n")
 	stdout, stderr, code := p.run("sh", "-c", "ls -A /app | tr '\\n' ','; test ! -e /app/.env && echo no-env-in-image")
 	if code != 0 || !strings.Contains(stdout, "no-env-in-image") {
 		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
@@ -1949,5 +1949,71 @@ func TestSerialPortsOfTheMachineAppearByTheirStableName(t *testing.T) {
 	stdout, stderr, code := p.run("sh", "-c", script)
 	if code != 0 || !strings.Contains(stdout, name) || !strings.Contains(stdout, "node-ok") {
 		t.Errorf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+}
+
+// A project with a Dockerfile.az and a .dockerignore, but no
+// Dockerfile.az.dockerignore, is asked what to do about it when it starts in a terminal.
+func TestIgnoreFallbackAsksInATerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name, answer    string
+		wantOld, wantAz string // "" means the file must not exist
+	}{
+		{"rename", "r\n", "", "node_modules\n"},
+		{"create", "c\n", "node_modules\n", "-empty-"},
+		{"neither", "\n", "node_modules\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := "it-fallback-" + tc.name
+			p := newProject(t)
+			p.write("Dockerfile.az", "FROM debian:stable-slim\n")
+			p.write(".dockerignore", "node_modules\n")
+			p.write("aicatraz.yaml", "project: {id: "+id+"}\nvolumes:\n  - ~/p:rw\n")
+			p.removeImage(id)
+
+			tm := p.startTerm("run", "--no-session", "--approve-build", "--", "true")
+			tm.expect("Dockerfile.az.dockerignore", 30*time.Second)
+			tm.expect("[r/c/N]", 5*time.Second)
+			tm.send(tc.answer)
+			if code := tm.wait(3 * time.Minute); code != 0 {
+				t.Fatalf("exit %d\n%q", code, tm.screen())
+			}
+
+			read := func(name string) string {
+				b, err := os.ReadFile(filepath.Join(p.dir, name))
+				if err != nil {
+					return ""
+				}
+				if len(b) == 0 {
+					return "-empty-"
+				}
+				return string(b)
+			}
+			if got := read(".dockerignore"); got != tc.wantOld {
+				t.Errorf(".dockerignore = %q, want %q", got, tc.wantOld)
+			}
+			if got := read("Dockerfile.az.dockerignore"); got != tc.wantAz {
+				t.Errorf("Dockerfile.az.dockerignore = %q, want %q", got, tc.wantAz)
+			}
+		})
+	}
+}
+
+// Without a terminal nothing is asked and nothing is touched.
+func TestIgnoreFallbackWithoutTerminalLeavesFilesAlone(t *testing.T) {
+	p := newProject(t)
+	p.write("Dockerfile.az", "FROM debian:stable-slim\n")
+	p.write(".dockerignore", "node_modules\n")
+	p.write("aicatraz.yaml", "project: {id: it-fallback-noterm}\nvolumes:\n  - ~/p:rw\n")
+	p.removeImage("it-fallback-noterm")
+
+	if _, stderr, code := p.run("true"); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(p.dir, "Dockerfile.az.dockerignore")); err == nil {
+		t.Error("Dockerfile.az.dockerignore created without a terminal")
+	}
+	if b, _ := os.ReadFile(filepath.Join(p.dir, ".dockerignore")); string(b) != "node_modules\n" {
+		t.Errorf(".dockerignore = %q", b)
 	}
 }

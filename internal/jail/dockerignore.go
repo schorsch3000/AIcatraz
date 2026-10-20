@@ -77,21 +77,41 @@ func (p ignorePattern) matches(rel string) bool {
 	return false
 }
 
-// ignoreFilesFor lists the ignore files that may apply to a build: the
-// context's .dockerignore and the BuildKit-style <dockerfile>.dockerignore.
-// Which one the builder honours depends on the builder, so every existing
-// file has to pass the check.
+// IgnorePath is the ignore file of a build: <dockerfile>.dockerignore, which
+// BuildKit reads ahead of the context's .dockerignore.
+func IgnorePath(b Build) string { return b.Dockerfile + ".dockerignore" }
+
+// ignoreFilesFor lists the ignore files that apply to a build: the Dockerfile's
+// own, if it exists.
 func ignoreFilesFor(b Build) []string {
-	var files []string
-	for _, f := range []string{
-		filepath.Join(b.Context, ".dockerignore"),
-		b.Dockerfile + ".dockerignore",
-	} {
-		if st, err := os.Stat(f); err == nil && !st.IsDir() {
-			files = append(files, f)
-		}
+	f := IgnorePath(b)
+	if st, err := os.Stat(f); err == nil && !st.IsDir() {
+		return []string{f}
 	}
-	return files
+	return nil
+}
+
+// MigrateIgnore is the fallback for projects that only have a .dockerignore:
+// with no <dockerfile>.dockerignore but a .dockerignore in the build context,
+// ask is called and answers "rename" (the .dockerignore becomes the
+// Dockerfile's), "create" (a blank one is written, the .dockerignore stays) or
+// anything else to leave things as they are.
+func MigrateIgnore(b Build, ask func(old, new string) string) error {
+	dst := IgnorePath(b)
+	if _, err := os.Lstat(dst); err == nil {
+		return nil
+	}
+	old := filepath.Join(b.Context, ".dockerignore")
+	if st, err := os.Stat(old); err != nil || st.IsDir() {
+		return nil
+	}
+	switch ask(old, dst) {
+	case "rename":
+		return os.Rename(old, dst)
+	case "create":
+		return os.WriteFile(dst, nil, 0o644)
+	}
+	return nil
 }
 
 // IgnoreGap is a hidden path inside the build context that one ignore file
@@ -118,8 +138,8 @@ func hiddenInContext(b Build, hidden []string) []string {
 }
 
 // IgnoreGaps lists, for every applicable ignore file, the hidden paths it
-// does not exclude. With no ignore file at all, the context's .dockerignore
-// is the one that is missing them.
+// does not exclude. With no ignore file at all, the Dockerfile's
+// .dockerignore is the one that is missing them.
 func IgnoreGaps(b Build, hidden []string) ([]IgnoreGap, error) {
 	inCtx := hiddenInContext(b, hidden)
 	if len(inCtx) == 0 {
@@ -128,7 +148,7 @@ func IgnoreGaps(b Build, hidden []string) ([]IgnoreGap, error) {
 	files := ignoreFilesFor(b)
 	var gaps []IgnoreGap
 	if len(files) == 0 {
-		f := filepath.Join(b.Context, ".dockerignore")
+		f := IgnorePath(b)
 		for _, rel := range inCtx {
 			gaps = append(gaps, IgnoreGap{File: f, Rel: rel})
 		}
@@ -166,8 +186,8 @@ func CheckHidden(b Build, hidden []string) error {
 	}
 	g := gaps[0]
 	if !g.Exists {
-		return fmt.Errorf("hidden path %q is inside the build context %s but there is no .dockerignore excluding it; "+
-			"add it to %s so it can't end up in the image", g.Rel, b.Context, g.File)
+		return fmt.Errorf("hidden path %q is inside the build context %s but there is no %s excluding it; "+
+			"add it to %s so it can't end up in the image", g.Rel, b.Context, filepath.Base(g.File), g.File)
 	}
 	return fmt.Errorf("hidden path %q is inside the build context but %s does not exclude it; "+
 		"add a line for it so it can't end up in the image", g.Rel, g.File)
