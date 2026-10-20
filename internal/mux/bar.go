@@ -171,11 +171,15 @@ func (b BarInfo) Render(width int, now time.Time) string {
 	if center != "" {
 		sb.WriteString(strings.Repeat(" ", start-pos))
 		if alert {
-			look := alertOff
-			if AlertPhase(now) {
-				look = alertOn
+			if b.Colors.Rainbow { // the rainbow turns instead of the alert blinking
+				sb.WriteString("\x1b[1m" + center + "\x1b[22m")
+			} else {
+				look := alertOff
+				if AlertPhase(now) {
+					look = alertOn
+				}
+				sb.WriteString(look + center + b.style())
 			}
-			sb.WriteString(look + center + b.style())
 		} else {
 			sb.WriteString(center)
 		}
@@ -189,7 +193,11 @@ func (b BarInfo) Render(width int, now time.Time) string {
 	sb.WriteString(right)
 	sb.WriteString("\x1b[0m")
 	if b.Colors.Rainbow {
-		return rainbow(sb.String(), width)
+		phase := 0.0
+		if alert {
+			phase = rainbowPhase(now)
+		}
+		return rainbow(sb.String(), width, phase)
 	}
 	return sb.String()
 }
@@ -197,24 +205,36 @@ func (b BarInfo) Render(width int, now time.Time) string {
 // rainbowStops are the colors of the rainbow theme, light enough for black text.
 var rainbowStops = [][3]int{{255, 107, 107}, {255, 169, 77}, {255, 224, 102}, {105, 219, 124}, {102, 217, 232}, {116, 167, 255}, {177, 151, 252}}
 
-// rainbowAt is the background of a column: the stops spread over the width.
-func rainbowAt(col, width int) string {
-	pos := 0.0
+// rainbowPeriod is how long the rainbow takes to go once around while an alert
+// is waiting.
+const rainbowPeriod = 4 * time.Second
+
+// rainbowPhase is how far the rainbow has turned at a moment, from 0 to 1.
+func rainbowPhase(now time.Time) float64 {
+	return float64(now.UnixMilli()%rainbowPeriod.Milliseconds()) / float64(rainbowPeriod.Milliseconds())
+}
+
+// rainbowAt is the background of a column. The stops sit on a ring (violet runs
+// back into red); at rest the bar shows the first six sevenths of it, red to
+// violet, and turning moves the colors along the ring.
+func rainbowAt(col, width int, phase float64) string {
+	n := float64(len(rainbowStops))
+	r := 0.0
 	if width > 1 {
-		pos = float64(col) / float64(width-1) * float64(len(rainbowStops)-1)
+		r = float64(col) / float64(width-1) * (n - 1) / n
 	}
-	i := min(int(pos), len(rainbowStops)-2)
-	f := pos - float64(i)
-	a, z := rainbowStops[i], rainbowStops[i+1]
+	r = math.Mod(r+phase, 1) * n
+	i := int(r) % len(rainbowStops)
+	f := r - math.Floor(r)
+	a, z := rainbowStops[i], rainbowStops[(i+1)%len(rainbowStops)]
 	mix := func(k int) int { return a[k] + int(math.Round(float64(z[k]-a[k])*f)) }
 	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", mix(0), mix(1), mix(2))
 }
 
-// rainbow gives every column of a rendered bar its own background, leaving
-// an alert, which has colors of its own, alone.
-func rainbow(bar string, width int) string {
+// rainbow gives every column of a rendered bar its own background.
+func rainbow(bar string, width int, phase float64) string {
 	var sb strings.Builder
-	col, last, alert := 0, "", false
+	col, last := 0, ""
 	for i := 0; i < len(bar); {
 		if bar[i] == 0x1b && i+1 < len(bar) && bar[i+1] == '[' {
 			j := i + 2
@@ -222,25 +242,14 @@ func rainbow(bar string, width int) string {
 				j++
 			}
 			j = min(j+1, len(bar))
-			seq := bar[i:j]
-			switch seq {
-			case alertOn, alertOff:
-				alert = true
-			default:
-				if strings.HasPrefix(seq, "\x1b[0;") {
-					alert, last = false, "" // the bar's own style came back and reset the background
-				}
-			}
-			sb.WriteString(seq)
+			sb.WriteString(bar[i:j])
 			i = j
 			continue
 		}
 		_, n := utf8.DecodeRuneInString(bar[i:])
-		if !alert {
-			if bg := rainbowAt(col, width); bg != last {
-				sb.WriteString(bg)
-				last = bg
-			}
+		if bg := rainbowAt(col, width, phase); bg != last {
+			sb.WriteString(bg)
+			last = bg
 		}
 		sb.WriteString(bar[i : i+n])
 		col++

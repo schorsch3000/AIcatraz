@@ -412,8 +412,18 @@ func TestRainbowTheme(t *testing.T) {
 	if c, _ := ResolveColors("lime", "", ""); c.Rainbow || c.BG != "48;5;118" {
 		t.Errorf("lime: %+v", c)
 	}
-	alert := BarInfo{Project: "p", Colors: c, Started: now, Alert: "waiting"}.Render(60, now)
-	if !strings.Contains(alert, "waiting") {
-		t.Errorf("alert lost: %q", alert)
+	// An alert does not blink; the rainbow turns instead.
+	at := func(d time.Duration) string {
+		return BarInfo{Project: "p", Colors: c, Started: now, Alert: "waiting"}.Render(60, time.UnixMilli(1_000_000_000).Add(d))
+	}
+	first, later := at(0), at(rainbowPeriod/4)
+	if !strings.Contains(visibleText(first), "waiting") || strings.Contains(first, alertOn) || strings.Contains(first, alertOff) {
+		t.Errorf("a rainbow alert is shown without the blinking colors: %q", first)
+	}
+	if first == later || at(0) != first || at(rainbowPeriod) != first {
+		t.Error("the rainbow turns during an alert, once around per period")
+	}
+	if visibleText(first) != visibleText(later) {
+		t.Error("only the colors change as it turns")
 	}
 }

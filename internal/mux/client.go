@@ -637,6 +637,8 @@ func (c *client) idle() {
 		case now.Sub(c.lastKey) >= c.idleFor:
 			c.openPending()
 			return
+		case c.scr.Active() && c.bar.Colors.Rainbow:
+			c.drawBar(true) // the rainbow turns
 		case c.scr.Active() && AlertPhase(now) != c.lastPhase:
 			c.drawBar(true) // the alert blinks
 		}

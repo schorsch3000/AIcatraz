@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- With the `rainbow` theme a waiting prompt no longer blinks the bar's message; the rainbow turns (once around in 4 seconds) until the prompt opens.
+
 ## 0.6.0 (2026-10-20)
 
 - `aicatraz run` in a terminal now runs as an `up` session, like the agent commands: status bar, detach, and approval prompts over the screen. `--no-session` runs it directly as before; without a terminal, or with `--approval-tty`, it always does.
