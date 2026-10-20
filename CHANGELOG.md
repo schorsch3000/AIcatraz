@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-20)
 
 - Command line: every flag is checked against one table per command. A mistake now names the flag and the command (`unknown flag --x for aicatraz up`) and points to `aicatraz help up`, instead of printing the whole usage. `aicatraz help [command]` and `<command> --help` list the flags of a command and never read a config. `--flag=value` works for long flags, `-c file` works the same on every command (including `config check`), and unknown commands suggest the closest name.
 - The usage text is shorter and grouped; flags that it left out (`--agent`, `--resume`, `--approval-tty`, `--approval-sock`, `--no-session`) are in `help <command>`. Exit codes are documented.
