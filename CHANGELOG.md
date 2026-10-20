@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 (2026-10-20)
 
 - With the `rainbow` theme a waiting prompt no longer blinks the bar's message; the rainbow turns (once around in 4 seconds) until the prompt opens.
 
