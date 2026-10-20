@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 (2026-10-20)
+
+- New bar themes: `lime`, `coral`, `rose`, `ocean` and `rainbow`. `rainbow` is a gradient from red to violet across the bar (black text); a background of your own (`--bar-bg`, `bg:`) turns the gradient off. `aicatraz bar-colors` shows all 23 themes.
+
 ## 0.4.0 (2026-10-20)
 
 - Fix: since 0.3.1 the hidden-path check and the device node maker did nothing. The change that makes the CLI refuse to run inside a jail also refused the two internal commands the launcher runs inside it, so a hidden file that became visible was not noticed, and device nodes were not made. Those two commands are allowed again.
