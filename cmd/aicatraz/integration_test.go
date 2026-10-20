@@ -65,7 +65,10 @@ func newProject(t *testing.T) *project {
 	if err := os.MkdirAll(p.dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// The tests drive terminals; answer the user config question up front.
+	// The tests drive terminals; answer the user config question up front. The
+	// user config follows XDG_CONFIG_HOME when that is set (it is on CI), so
+	// point it at the fake home too.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(p.home, ".config"))
 	cfgDir := filepath.Join(p.home, ".config", "aicatraz")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
