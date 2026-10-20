@@ -1,6 +1,6 @@
 # Sessions, the status bar and the terminal
 
-`aicatraz up` (and the agent commands, in a terminal) run the jail as a **session**: a small server keeps the program in the jail alive when you detach, and a client attaches to it. This page is about that: detaching, the status bar and its colors, the window title, and what to do when a terminal misbehaves. How it is built is in [design.md](design.md#approval-prompts) and [milestones.md](../milestones.md).
+`aicatraz up` (and the agent commands, in a terminal) run the jail as a **session**: a small server keeps the program in the jail alive when you detach, and a client attaches to it. This page is about that: detaching, the status bar and its colors, the window title, and what to do when a terminal misbehaves. How it is built is in [design.md](design.md#approval-prompts).
 
 ## The status bar
 

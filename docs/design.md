@@ -1,6 +1,6 @@
 # How AIcatraz works
 
-The design as it stands, with the reasoning. For using it see the [README](../README.md) and the [configuration reference](configuration.md); for what it does and does not protect against see [security.md](security.md); for the order things were built in and how each was tested see [milestones.md](../milestones.md). The original idea and the first design were folded into this page and `milestones.md`, and the agent entrypoints into [agents.md](agents.md).
+The design as it stands, with the reasoning. For using it see the [README](../README.md) and the [configuration reference](configuration.md); for what it does and does not protect against see [security.md](security.md). The original idea and the first design were folded into this page, and the agent entrypoints into [agents.md](agents.md).
 
 ## Goal and non-goals
 
@@ -146,7 +146,7 @@ Append-only file owned by the host user, outside every mounted volume. One JSON 
 4. Pin store, `depends_on`, presets, diff in the prompt; also covers `Dockerfile.az`.
 5. Agent entrypoints (`aicatraz claude`, ...): tool cache, config sync, skip-permissions.
 6. Canary check for hidden files, config linter, `confine_paths`.
-7. Optional: built-in multiplexer, pin tooling, egress allowlist; later also sudo, published ports, devices, window titles (see `milestones.md`).
+7. Optional: built-in multiplexer, pin tooling, egress allowlist; later also sudo, published ports, devices, window titles.
 
 ## What changed from the first idea and why
 - **Kept:** Docker jail, scope containment as the goal, unix-socket proxy, a wrapper that doesn't decide, allowlist with first-match-wins, `allow`/`ask` per command, same-path mounts, static and from-host container env, heartbeat and retry, pty execution.

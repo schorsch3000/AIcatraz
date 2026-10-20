@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/osrelease"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -226,9 +227,33 @@ func TestEnsureUserConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	path := config.UserConfigPath(home)
+	marker := filepath.Join(filepath.Dir(path), declinedMarker)
+	yes := func() io.Reader { return strings.NewReader("\n") }
 
+	// Nobody to ask (a script, a pipe): nothing is written, nothing is said.
 	var errb bytes.Buffer
-	ensureUserConfig(&errb)
+	ensureUserConfig(yes(), false, &errb)
+	if _, err := os.Stat(path); err == nil || errb.Len() != 0 {
+		t.Fatalf("wrote without asking: %v %q", err, errb.String())
+	}
+
+	// Saying no is remembered: no file, no second question.
+	ensureUserConfig(strings.NewReader("n\n"), true, &errb)
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("written although declined")
+	}
+	if _, err := os.Stat(marker); err != nil || !strings.Contains(errb.String(), "Create it?") {
+		t.Fatalf("no marker or question: %v %q", err, errb.String())
+	}
+	errb.Reset()
+	ensureUserConfig(yes(), true, &errb)
+	if _, err := os.Stat(path); err == nil || errb.Len() != 0 {
+		t.Fatalf("asked again after a no: %v %q", err, errb.String())
+	}
+	os.Remove(marker)
+
+	// Enter (the default) says yes.
+	ensureUserConfig(yes(), true, &errb)
 	b, err := os.ReadFile(path)
 	if err != nil || !strings.Contains(string(b), "# approval:") {
 		t.Fatalf("not written: %v", err)
@@ -246,7 +271,7 @@ func TestEnsureUserConfig(t *testing.T) {
 	// An existing file is left alone, silently.
 	os.WriteFile(path, []byte("approval: {idle: 1s}\n"), 0o644)
 	errb.Reset()
-	ensureUserConfig(&errb)
+	ensureUserConfig(yes(), true, &errb)
 	if got, _ := os.ReadFile(path); string(got) != "approval: {idle: 1s}\n" || errb.Len() != 0 {
 		t.Errorf("changed: %q %q", got, errb.String())
 	}

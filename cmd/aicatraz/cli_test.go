@@ -230,3 +230,20 @@ func TestMissingConfigSaysWhatToDo(t *testing.T) {
 		t.Errorf("named file: %q", errb.String())
 	}
 }
+
+func TestNewCommandsRejectStrayArguments(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	os.WriteFile("aicatraz.yaml", []byte("project: {id: strays}\n"), 0o644)
+	t.Setenv("XDG_STATE_HOME", dir)
+	for _, args := range [][]string{{"status", "x"}, {"log", "x"}, {"log", "-n", "many"}, {"clean", "x"}, {"clean", "--lines", "3"}} {
+		var out, errb bytes.Buffer
+		if code := cli(args, &out, &errb); code != 2 {
+			t.Errorf("%v: exit %d (%s)", args, code, errb.String())
+		}
+	}
+	var out, errb bytes.Buffer
+	if code := cli([]string{"log", "--lines=5"}, &out, &errb); code != 0 {
+		t.Errorf("log --lines=5: exit %d %s", code, errb.String())
+	}
+}

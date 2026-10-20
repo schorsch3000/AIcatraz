@@ -26,9 +26,22 @@ The README has the short version. This is the full list.
 | `aicatraz sessions` | List the agent sessions of this project. |
 | `aicatraz resume [id] [--pick]` | Continue the latest (or a given) agent session. |
 | `aicatraz tools [list \| install <tool> [version] [--from-host] \| update [tool]]` | Manage the cached agent executables. |
+| `aicatraz status` | The running jails of all projects (not the network helpers). |
+| `aicatraz log [-f] [-n N]` | The audit log of this project, newest last: host commands asked for and what was decided, network prompts, devices, with the pin warnings. Shows the last 20 entries (`-n 0`: all); `-f` keeps following. The raw JSON lines are in `~/.local/state/aicatraz/<project>/audit.log`. |
+| `aicatraz doctor` | Check Docker (installed, daemon reachable, permissions), `tmux` (optional), the runtime and state directories, the user config and the project's config. Exits 1 if something that stops AIcatraz is wrong. |
+| `aicatraz clean [--yes]` | Remove the state directory and the images of projects whose config file no longer exists. It lists them and asks first; without a terminal it needs `--yes`. A project moved without `project.id` set looks gone here, so run the project once from its new place first. Projects started with an older version have no recorded location and are never touched. |
+| `aicatraz help [command]` | The usage, or the flags of one command. `aicatraz <command> --help` does the same. |
 | `aicatraz version` | Print the version. |
 
-Flags for `run`, `up` and the agent commands: `-c file` (config, default `aicatraz.yaml`), `--print` (show the `docker` commands and change nothing), `--approval-tty /dev/pts/N`, `--approve-build` (pin a changed `Dockerfile.az` without asking).
+Flags for `run`, `up` and the agent commands: `-c file` (config, default `aicatraz.yaml`), `--print` (show the `docker` commands and change nothing), `--approval-tty /dev/pts/N`, `--approve-build` (pin a changed `Dockerfile.az` without asking). `aicatraz help <command>` lists the flags of each command.
+
+**One way to write flags, everywhere.** Every command that reads a project's config takes `-c file` (or `--config file`), also `config check -c file`, and anywhere on the line. Long flags also take `--flag=value`. A flag a command does not have is an error that names the flag and the command; nothing is guessed. After `--` everything belongs to the program in the jail.
+
+**Missing config.** Commands that need `aicatraz.yaml` say so, and what to do (`aicatraz init`, or `-c file`), instead of failing on the file name.
+
+**Status bar flags.** `--status-bar bottom|off` turns the bar on or off. Its colors are `--bar-theme <name>` (a theme from `bar-colors`, or `random`) and `--bar-fg` / `--bar-bg` (a color); to keep a choice, use the `bar` section of the user or project config instead (see [sessions.md](sessions.md#the-status-bar)).
+
+**Exit codes.** `0` ok. `1` a config with errors (`config check`, `doctor`), or `init` would overwrite. `2` anything else that went wrong, including a bad command line. `run`, `up` and the agent commands exit with the code of the program that ran in the jail.
 
 Output is colored on a terminal. `NO_COLOR` turns it off; `AICATRAZ_COLOR=always|never` overrides the detection.
 
@@ -37,7 +50,7 @@ Output is colored on a terminal. `NO_COLOR` turns it off; `AICATRAZ_COLOR=always
 | Where | What |
 |---|---|
 | `aicatraz.yaml`, `Dockerfile.az` | Your config and the image the jail runs in (in the project). Optional `Dockerfile.az`; without it a plain Debian is used. |
-| `~/.local/state/aicatraz/<project>/` | Per-project state: audit log, pins, session index, the agents' config and history. Outside every mount. |
+| `~/.local/state/aicatraz/<project>/` | Per-project state: audit log (`aicatraz log`), pins, session index, the agents' config and history, and `project` (the path of the config, for `clean`). Outside every mount. |
 | `~/.local/share/aicatraz/tools/` | Cached agent executables. |
 | `$XDG_RUNTIME_DIR/aicatraz/<pid>/` | The broker's socket for a running session. |
 
@@ -60,6 +73,8 @@ aicatraz completion fish | source        # fish (or save to ~/.config/fish/compl
 | `the file is not read from here on: this line is indented differently ...` | A line is indented less than the first key of the file, and YAML stops reading there: usually an example switched on by removing only the `#`, which leaves a space in front of the key. | Remove the space too, so every top-level key starts in column 1. |
 | `volume ...: ... does not exist` | A hidden path must exist at launch (otherwise the agent could create it). | Create the file or directory. |
 | The agent can't reach its service, `connection refused` everywhere | The jail has no network unless the config gives it one (the starter from `init` asks about each connection instead). | Add `network: open`, or rules (see [`network`](configuration.md#network)). |
+| `no aicatraz.yaml in this directory` | You are not in a project, or it has no config yet. | `cd` to the project, run `aicatraz init`, or name a file with `-c`. |
+| `unknown flag --x for aicatraz up` | The command has no such flag. | `aicatraz help up` lists the flags it has. |
 | `aicatraz: refusing to run inside a jail` | The CLI was started inside a jail (the broker socket is mounted). | Run it on the host. `az` inside a jail stays a proxied command. |
 | `no approval terminal: ask rules will be denied` | Nobody can be asked. | Start with `aicatraz up`, or pass `--approval-tty`. |
 | `build files changed since they were last approved` | `Dockerfile.az` is new or changed, and there is no terminal to ask. | Run `aicatraz run` interactively once and answer `p`, or pass `--approve-build`. |

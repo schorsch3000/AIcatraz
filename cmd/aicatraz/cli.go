@@ -125,6 +125,33 @@ func cli(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return 0
+	case "status":
+		if len(args) > 1 {
+			return badArgs(stderr, unexpected("status", args[1]))
+		}
+		if err := jail.Status(stdout); err != nil {
+			ui.Error(stderr, "%v", err)
+			return 2
+		}
+		return 0
+	case "log":
+		return runLog(args[1:], stdout, stderr)
+	case "doctor":
+		file, _ := configArg(args[1:])
+		if jail.Doctor(file, stdout) {
+			return 0
+		}
+		return 1
+	case "clean":
+		yes := len(args) > 1 && (args[1] == "--yes" || args[1] == "-y")
+		if len(args) > 1 && !yes {
+			return badArgs(stderr, unexpected("clean", args[1]))
+		}
+		if err := jail.Clean(yes, os.Stdin, term.IsTerminal(int(os.Stdin.Fd())), stdout, stderr); err != nil {
+			ui.Error(stderr, "%v", err)
+			return 2
+		}
+		return 0
 	case "bar-colors":
 		w := 80
 		if f, ok := stdout.(*os.File); ok {
@@ -302,7 +329,7 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	if !opts.Print { // --print changes nothing
-		ensureUserConfig(stderr)
+		askUserConfig(stderr)
 	}
 
 	if verb == "resume" {
@@ -413,4 +440,33 @@ func styledUsage(st ui.Style) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// runLog parses the flags of `aicatraz log`.
+func runLog(args []string, stdout, stderr io.Writer) int {
+	o := jail.LogOptions{ConfigPath: defaultConfig, Lines: 20}
+	if len(args) >= 2 && args[0] == "--config" {
+		o.ConfigPath, args = args[1], args[2:]
+	}
+	for len(args) > 0 {
+		switch a := args[0]; a {
+		case "-f", "--follow":
+			o.Follow = true
+			args = args[1:]
+		case "-n", "--lines":
+			n, err := strconv.Atoi(args[1])
+			if err != nil || n < 0 {
+				return badArgs(stderr, &usageError{"log", fmt.Sprintf("%s needs a number of entries, not %q", a, args[1])})
+			}
+			o.Lines = n
+			args = args[2:]
+		default:
+			return badArgs(stderr, unexpected("log", a))
+		}
+	}
+	if err := jail.Log(o, stdout); err != nil {
+		ui.Error(stderr, "%v", err)
+		return 2
+	}
+	return 0
 }

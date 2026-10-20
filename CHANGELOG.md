@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Command line: every flag is checked against one table per command. A mistake now names the flag and the command (`unknown flag --x for aicatraz up`) and points to `aicatraz help up`, instead of printing the whole usage. `aicatraz help [command]` and `<command> --help` list the flags of a command and never read a config. `--flag=value` works for long flags, `-c file` works the same on every command (including `config check`), and unknown commands suggest the closest name.
+- The usage text is shorter and grouped; flags that it left out (`--agent`, `--resume`, `--approval-tty`, `--approval-sock`, `--no-session`) are in `help <command>`. Exit codes are documented.
+- A missing `aicatraz.yaml` now says to run `aicatraz init` or use `-c`, instead of `open aicatraz.yaml: no such file or directory`.
+- New: `aicatraz status` (running jails of all projects), `log [-f] [-n N]` (the audit log, readable), `doctor` (checks Docker and the rest) and `clean` (removes state and images of projects whose config is gone; asks first).
+- The user config is now offered, not written silently: it asks first, only in a terminal, and remembers a no.
+- Docs: install from a release binary; which of `claude`, `up` and `run` to use. `milestones.md` is removed.
+
 ## 0.3.1 (2026-10-20)
 
 - Fix: the status bar of `aicatraz up` stayed damaged when the program never went quiet, such as opencode's thinking spinner drawing over it. The bar is now repainted at least once a second even while the program is writing, and absolute row addressing (CUP, HVP, VPA) is kept above the bar row.

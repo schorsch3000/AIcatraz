@@ -89,6 +89,7 @@ func Launch(o Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	recordProject(state, cfgAbs)
 	img, err := ResolveImage(cfg, cfgDir, id)
 	if err != nil {
 		return 0, err

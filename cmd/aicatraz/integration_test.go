@@ -65,6 +65,14 @@ func newProject(t *testing.T) *project {
 	if err := os.MkdirAll(p.dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The tests drive terminals; answer the user config question up front.
+	cfgDir := filepath.Join(p.home, ".config", "aicatraz")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, declinedMarker), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	rt, err := os.MkdirTemp("", "rt")
 	if err != nil {
 		t.Fatal(err)

@@ -27,21 +27,25 @@ It contains the *scope*, not the secrets inside it: an agent you let reach the n
 - **Agents out of the box.** `aicatraz claude` and `aicatraz opencode` install the agent, copy your settings in, and remember sessions for `aicatraz resume`. [Details](docs/agents.md).
 - **Sessions you can walk away from.** `aicatraz up` keeps the jail running when you detach (`Ctrl-Y`), shows approval prompts over the agent's screen (held back while you type), and has a status bar.
 - **The odds and ends.** Published ports (reach a dev server from your browser), USB devices that survive being unplugged (Arduino, ESP, Pico), `sudo` inside the jail if you must, and an audit log of every request.
-- **Settings that are yours.** `~/.config/aicatraz/config.yaml` is written on first use, with everything commented out. It holds the approval timing, status bar, network default and the like for all projects; it can't hold volumes or rules, so it can't widen a jail. [Details](docs/configuration.md#the-user-config).
+- **Settings that are yours.** `~/.config/aicatraz/config.yaml` is offered on first use (it asks first), with everything commented out. It holds the approval timing, status bar, network default and the like for all projects; it can't hold volumes or rules, so it can't widen a jail. [Details](docs/configuration.md#the-user-config).
 
 ## Requirements
 
-Linux, and Docker (tested with 26.1). Go 1.24 to build it. `tmux` only if you want `up --tmux`. The agents need a Debian or Ubuntu based image, because they are built against glibc.
+Linux, and Docker (tested with 26.1). Go 1.24 only if you build it yourself. `tmux` only if you want `up --tmux`. The agents need a Debian or Ubuntu based image, because they are built against glibc.
 
 ## Install
 
+Download the binary for your machine (`linux-amd64` or `linux-arm64`) from the [releases page](https://github.com/schorsch3000/AIcatraz/releases), check it against `SHA256SUMS`, and put it on your `PATH`:
+
 ```bash
-git clone <this repository> aicatraz && cd aicatraz
-make build                                      # bin/aicatraz, one static binary
-install -m 0755 bin/aicatraz ~/.local/bin/      # or anywhere on your PATH
-ln -s aicatraz ~/.local/bin/az                  # optional: `az` is a short alias
-source <(aicatraz completion bash)              # also: zsh, fish
+sha256sum -c --ignore-missing SHA256SUMS                  # in the folder you downloaded to
+install -m 0755 aicatraz-v*-linux-amd64 ~/.local/bin/aicatraz
+ln -s aicatraz ~/.local/bin/az                            # optional: `az` is a short alias
+source <(aicatraz completion bash)                        # also: zsh, fish; add it to your shell's rc file
+aicatraz doctor                                           # checks Docker and the rest
 ```
+
+It is one static binary with nothing else to install. To build it from source instead: `git clone <this repository> && make build`, which leaves `bin/aicatraz`.
 
 ## Five minutes
 
@@ -84,6 +88,8 @@ aicatraz claude                           # first run installs it; later runs ju
 
 ## The commands you will use
 
+Which one do I want? **`claude`** or **`opencode`** to work with an agent, **`up`** for anything that should keep running while you are away, **`run`** for a quick shell or a one-off command. `agent` is `claude` or `opencode` for whichever agent your config names (`agent.tool`).
+
 | | |
 |---|---|
 | `aicatraz run [-- cmd]` | The jail in this terminal. |
@@ -91,9 +97,11 @@ aicatraz claude                           # first run installs it; later runs ju
 | `aicatraz claude`, `opencode`, `resume` | Agents. In a terminal they run as an `up` session. |
 | `aicatraz config check` | Validate the config and lint it. |
 | `aicatraz shell` | Another shell in the running jail. |
+| `aicatraz status`, `log` | What is running, across all projects; and the audit log of this one: what the agent asked for and what was decided (`log -f` follows it). |
 | `aicatraz devices`, `network`, `pins`, `sessions`, `tools` | Look at, and change, the things their names suggest. |
+| `aicatraz doctor`, `clean` | Check that Docker and the rest are in order; remove what projects that no longer exist left behind. |
 
-`aicatraz` with no arguments prints all of them; [docs/commands.md](docs/commands.md) lists every command and flag, where the files live, and what the common error messages mean.
+`aicatraz` with no arguments prints all of them, and `aicatraz help <command>` lists the flags of one. [docs/commands.md](docs/commands.md) lists every command and flag, where the files live, and what the common error messages mean.
 
 ## Things that surprise people
 
@@ -115,7 +123,6 @@ aicatraz claude                           # first run installs it; later runs ju
 | [docs/agents.md](docs/agents.md) | Claude Code and opencode: installation, config sync, sessions. |
 | [docs/design.md](docs/design.md) | How it works and why: the door, pins, prompts, the audit log. |
 | [docs/development.md](docs/development.md) | Building, testing, the code layout, reproducible releases. |
-| [milestones.md](milestones.md) | How it was built, and how each part was tested. |
 
 ## Development
 
