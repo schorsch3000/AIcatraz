@@ -87,3 +87,26 @@ func TestTrackerKeyboardModes(t *testing.T) {
 		t.Error("popping more than was pushed empties the stack")
 	}
 }
+
+func TestTrackerKittyFlagsSetNotPushed(t *testing.T) {
+	var tr Tracker
+	feed(&tr, "\x1b[=5;1u")
+	if pre := string(tr.Preamble()); pre != "\x1b[=5;1u" {
+		t.Errorf("flags set on an empty stack come back as set: %q", pre)
+	}
+	if rst := string(tr.Reset()); rst != "\x1b[=0;1u" {
+		t.Errorf("reset clears them: %q", rst)
+	}
+	feed(&tr, "\x1b[=2;2u", "\x1b[=1;3u") // add bit 2, remove bit 1
+	if pre := string(tr.Preamble()); pre != "\x1b[=6;1u" {
+		t.Errorf("modes 2 and 3 add and remove bits: %q", pre)
+	}
+	feed(&tr, "\x1b[>1u", "\x1b[=8;1u") // a set after a push changes the pushed entry, not the base
+	if pre := string(tr.Preamble()); pre != "\x1b[=6;1u\x1b[>8u" {
+		t.Errorf("set on top of a push: %q", pre)
+	}
+	feed(&tr, "\x1b[=0;1u", "\x1b[<u", "\x1b[=0u")
+	if len(tr.Preamble()) != 0 || len(tr.Reset()) != 0 {
+		t.Errorf("all flags off again: %q %q", tr.Preamble(), tr.Reset())
+	}
+}

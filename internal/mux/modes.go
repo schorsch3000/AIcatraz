@@ -22,6 +22,7 @@ type Tracker struct {
 
 	modes map[int]bool // DEC private modes that were set or reset explicitly
 	kitty []int        // stack of pushed kitty keyboard protocol flags
+	base  int          // kitty flags set (not pushed) while nothing was pushed
 	mok   int          // modifyOtherKeys level
 }
 
@@ -110,6 +111,30 @@ func (t *Tracker) csi(params []byte, final byte) {
 				}
 			}
 		}
+	case '=':
+		if final != 'u' { // set kitty keyboard flags: CSI = flags ; mode u
+			return
+		}
+		f := strings.Split(body, ";")
+		flags, _ := strconv.Atoi(f[0])
+		mode := 1
+		if len(f) > 1 {
+			if m, err := strconv.Atoi(f[1]); err == nil {
+				mode = m
+			}
+		}
+		cur := &t.base
+		if len(t.kitty) > 0 {
+			cur = &t.kitty[len(t.kitty)-1]
+		}
+		switch mode {
+		case 1:
+			*cur = flags
+		case 2:
+			*cur |= flags
+		case 3:
+			*cur &^= flags
+		}
 	case '<':
 		if final == 'u' { // pop kitty keyboard flags
 			n := 1
@@ -184,6 +209,9 @@ func (t *Tracker) Preamble() []byte {
 			fmt.Fprintf(&b, "\x1b[?%dl", n)
 		}
 	}
+	if t.base != 0 {
+		fmt.Fprintf(&b, "\x1b[=%d;1u", t.base)
+	}
 	for _, f := range t.kitty {
 		fmt.Fprintf(&b, "\x1b[>%du", f)
 	}
@@ -200,6 +228,9 @@ func (t *Tracker) Reset() []byte {
 	alt, other := t.changed()
 	if len(t.kitty) > 0 {
 		fmt.Fprintf(&b, "\x1b[<%du", len(t.kitty))
+	}
+	if t.base != 0 {
+		b.WriteString("\x1b[=0;1u")
 	}
 	if t.mok > 0 {
 		b.WriteString("\x1b[>4m")
