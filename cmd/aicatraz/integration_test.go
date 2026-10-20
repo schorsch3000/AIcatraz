@@ -392,7 +392,7 @@ rm /aicatraz/broker.sock 2>/dev/null && echo "socket-removed" || echo "socket-pr
 
 func TestInteractiveTerminalThroughTheBroker(t *testing.T) {
 	p := newProject(t)
-	p.write("aicatraz.yaml", "volumes:\n  - ~/p:rw\nrules:\n  - command: hostname\n    decision: allow\n  - command: read\n    decision: deny\n")
+	p.write("aicatraz.yaml", "project: {id: it-interactive}\nvolumes:\n  - ~/p:rw\nrules:\n  - command: hostname\n    decision: allow\n  - command: read\n    decision: deny\n")
 	hostName, _ := os.Hostname()
 
 	cmd := exec.Command(bin, "run", "--", "sh", "-c", `read line; echo "got:$line"; hostname`)
@@ -418,6 +418,9 @@ func TestInteractiveTerminalThroughTheBroker(t *testing.T) {
 			}
 		}
 	}()
+	// Type only once the jail is up: input that arrives while docker is still
+	// attaching can be lost, which is the terminal's behavior, not the program's.
+	waitContainer(t, "it-interactive")
 	ptmx.Write([]byte("abc\n"))
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -425,7 +428,9 @@ func TestInteractiveTerminalThroughTheBroker(t *testing.T) {
 	case <-done:
 	case <-time.After(60 * time.Second):
 		cmd.Process.Kill()
-		t.Fatal("timed out")
+		mu.Lock()
+		defer mu.Unlock()
+		t.Fatalf("timed out; the terminal showed %q", out.String())
 	}
 	time.Sleep(100 * time.Millisecond)
 	mu.Lock()
