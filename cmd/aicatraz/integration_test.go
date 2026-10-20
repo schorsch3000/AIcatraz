@@ -1766,11 +1766,13 @@ func TestAgentVerbRunsAsASession(t *testing.T) {
 	t.Cleanup(down)
 
 	tm := p.startTerm("claude", "--approve-build")
-	tm.expect("FAKE-AGENT-UP", 120*time.Second)
+	// The prompt can overtake the agent's first line, which is then held back
+	// until the prompt is answered, so the line is only waited for after that.
+	tm.expect("ON THE HOST", 120*time.Second) // the agent's `make deploy` asks, over its screen
 	tm.expect("detach with Ctrl-Y", 5*time.Second)
-	tm.expect("ON THE HOST", 20*time.Second) // the agent's `make deploy` asks, over its screen
 	time.Sleep(900 * time.Millisecond)
 	tm.send("y")
+	tm.expect("FAKE-AGENT-UP", 20*time.Second)
 	tm.expect("DEPLOYED-ON-HOST", 20*time.Second)
 	tm.expect("make-rc=0", 5*time.Second)
 	tm.send("hi\r")
