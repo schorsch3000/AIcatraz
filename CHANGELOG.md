@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 (2026-10-20)
+
+- Fix (possibly): Shift+Enter could submit the prompt instead of adding a line after a popup. The session now follows keyboard flags that a program sets (`CSI = flags u`) as well as pushes, and restores them when a popup closes.
+
 ## 0.5.0 (2026-10-20)
 
 - New bar themes: `lime`, `coral`, `rose`, `ocean` and `rainbow`. `rainbow` is a gradient from red to violet across the bar (black text); a background of your own (`--bar-bg`, `bg:`) turns the gradient off. `aicatraz bar-colors` shows all 23 themes.
