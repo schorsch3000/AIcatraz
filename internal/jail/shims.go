@@ -26,6 +26,22 @@ func ShimCommands(rules []config.Rule) []string {
 	return names
 }
 
+// NotifyCommand is the command the notification shim stands in for.
+const NotifyCommand = "notify-send"
+
+// WithNotify adds the notification shim to commands if the config asks for it.
+func WithNotify(commands []string, n config.Notifications) []string {
+	if !n.Shim {
+		return commands
+	}
+	for _, c := range commands {
+		if c == NotifyCommand {
+			return commands
+		}
+	}
+	return append(commands, NotifyCommand)
+}
+
 // WriteShimDir recreates dir with one symlink per command, each pointing at
 // the aicatraz binary as mounted inside the container. The links dangle on the
 // host; they only resolve inside the jail.

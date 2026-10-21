@@ -178,7 +178,8 @@ func UpMux(o Options) (int, error) {
 	}
 	ui.Note(o.Stderr, "detach with %s (the session keeps running), stop it with `%s down`", key.Name, ui.Prog)
 	res, err := mux.Attach(filepath.Join(dir, mux.AttachSock), os.Stdin, os.Stdout, mux.AttachOptions{Detach: key, Bar: bar, Project: id, Colors: colors, Info: info, ThemeName: theme, Settings: settings, LogPath: os.Getenv(TermLogEnv),
-		Idle: cfg.Approval.IdleOrDefault(), Guard: cfg.Approval.GuardOrDefault(), AlertSymbol: cfg.Bar.SymbolOrDefault(), AlertSymbolWidth: cfg.Bar.SymbolWidthOrDefault()})
+		Idle: cfg.Approval.IdleOrDefault(), Guard: cfg.Approval.GuardOrDefault(), AlertSymbol: cfg.Bar.SymbolOrDefault(), AlertSymbolWidth: cfg.Bar.SymbolWidthOrDefault(),
+		DropNotifications: !cfg.Notifications.OSCOrDefault()})
 	if err != nil {
 		return 0, err
 	}

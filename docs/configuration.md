@@ -8,6 +8,7 @@ image:      ...
 volumes:    [ ... ]
 env:        { static: {...}, from_host: [...] }
 sudo:       false
+notifications: { shim: true, osc: true }
 bar:        { theme: forest, fg: white, bg: "#102030", symbol: "⚠️", symbol_width: 2 }
 ports:      [ 3000, "8080:80" ]
 devices:    [ {serial: "usb-Arduino_*"}, {usb: "2e8a:*"}, {path: /dev/ttyUSB0} ]
@@ -27,6 +28,7 @@ Settings that are about you, not the project, can go into `~/.config/aicatraz/co
 ```yaml
 # ~/.config/aicatraz/config.yaml
 approval: { idle: 8s }
+notifications: { shim: true }
 bar: { theme: random, symbol: "⚠️", symbol_width: 2 }
 network: { default: ask }
 ```
@@ -222,6 +224,20 @@ bar:
 ```
 
 The look of the status bar of `aicatraz up` sessions in this project, to tell terminals apart at a glance. All keys are optional. `theme: random` takes a different named theme every time a session is attached. Colors are a name (`red`, `bright-blue`, `gray`), a number from 0 to 255, `#rrggbb`, or `default`. `symbol` is what the alert of a waiting prompt starts with (default `⚠️`; any text up to 8 characters, or `""` for none), and `symbol_width` is how many columns your terminal draws it in, 0 to 4. Terminals disagree about emoji: some draw `⚠️` two columns wide, some one. If the bar's right edge is off by one while an alert shows, set `symbol_width` to what you see. Without it AIcatraz guesses: 2 for an emoji, 1 for any other character. A flag overrides this, and this overrides the user's `AICATRAZ_BAR_*` variables, key by key. See [sessions.md](sessions.md#the-status-bar).
+
+## `notifications`
+
+```yaml
+notifications:
+  shim: true     # a `notify-send` in the jail shows a notification on your desktop (default: off)
+  osc: true      # terminal notification sequences (OSC 9, 99, 777) reach your terminal (default: on)
+```
+
+How an agent's desktop notifications get out of the jail. Both can be set in the user config too.
+
+`shim` puts a `notify-send` in the jail's `PATH`. The broker runs the host's own `notify-send` for it, and the jail sends text only: urgency, summary and body. Every other option (icons, hints, actions, timeouts) is dropped, control characters are removed, markup is escaped, the summary is cut at 100 characters and the body at 500, and the notification is labelled `AIcatraz <session>`. At most 5 in a burst, then one every 2 seconds. Each one is in the audit log. It needs `notify-send` and a desktop session on the host; there is no rule to write, and no D-Bus socket enters the jail. A `rules` entry for `notify-send` is ignored while `shim` is on.
+
+`osc` is about the escape sequences some agents print to ask your terminal for a notification. In an `up` session (and so `run` and the agent commands in a terminal) `osc: false` drops them; `--no-session` runs have no layer to drop them. Through `tmux` they only reach your terminal if tmux passes them on.
 
 ## `limits`
 

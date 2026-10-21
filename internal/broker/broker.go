@@ -79,6 +79,10 @@ type Broker struct {
 	gmu    sync.Mutex
 	grants map[string]bool // "allow for this session" keys
 
+	nmu     sync.Mutex // guards the notification rate limit
+	ntokens float64
+	nlast   time.Time
+
 	canary func() error // set by SetCanary; takes precedence over Options.Canary
 
 	fmu    sync.Mutex
@@ -255,6 +259,10 @@ func (b *Broker) handle(nc net.Conn) {
 		deny("the session is frozen: " + reason)
 		return
 	}
+	if h.Name == notifyName && b.cfg.Notifications.Shim {
+		b.handleNotify(conn, &h, entry)
+		return
+	}
 	d := b.pol.Decide(h.Name, h.Args)
 	if d.Rule != policy.NoRule {
 		r := d.Rule
@@ -372,6 +380,37 @@ func (b *Broker) handle(nc net.Conn) {
 		fin.ExitCode, fin.Signal = &exit.Code, exit.Signal
 	}
 	b.audit(fin)
+}
+
+// handleNotify serves the notification shim: not a policy rule, but a fixed
+// request the broker understands, so the jail only ever sends text.
+func (b *Broker) handleNotify(conn *proto.Conn, h *proto.Hello, entry Entry) {
+	deny := func(msg string) {
+		entry.Decision, entry.Message = "deny", msg
+		b.audit(entry)
+		conn.WriteJSON(proto.TDecision, proto.Decision{Action: proto.ActionDeny, Message: msg})
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, notifyTimeout)
+	defer cancel()
+	cmd, msg := b.notifyCommand(ctx, h)
+	if cmd == nil {
+		deny(msg)
+		return
+	}
+	entry.Decision, entry.Binary = "allow", cmd.Path
+	if b.audit(entry) != nil { // no log, no execution
+		conn.WriteJSON(proto.TDecision, proto.Decision{Action: proto.ActionDeny, Message: "audit log unavailable"})
+		return
+	}
+	if conn.WriteJSON(proto.TDecision, proto.Decision{Action: proto.ActionRun}) != nil {
+		return
+	}
+	code := 0
+	if out, err := cmd.CombinedOutput(); err != nil {
+		code = 1
+		conn.Write(proto.TStderr, []byte("notify-send: "+strings.TrimSpace(err.Error()+" "+string(out))+"\n"))
+	}
+	conn.WriteJSON(proto.TExit, proto.Exit{Code: code})
 }
 
 func (b *Broker) audit(e Entry) error {

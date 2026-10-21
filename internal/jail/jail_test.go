@@ -532,3 +532,16 @@ func TestApproveBuild(t *testing.T) {
 		t.Errorf("after --approve-build: %v", err)
 	}
 }
+
+func TestWithNotify(t *testing.T) {
+	on := config.Notifications{Shim: true}
+	if got := WithNotify([]string{"make"}, on); len(got) != 2 || got[1] != NotifyCommand {
+		t.Errorf("got %v", got)
+	}
+	if got := WithNotify([]string{NotifyCommand}, on); len(got) != 1 {
+		t.Errorf("a rule's own shim is not doubled: %v", got)
+	}
+	if got := WithNotify([]string{"make"}, config.Notifications{}); len(got) != 1 {
+		t.Errorf("off adds nothing: %v", got)
+	}
+}

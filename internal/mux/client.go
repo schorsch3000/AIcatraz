@@ -64,6 +64,10 @@ type AttachOptions struct {
 	// takes AlertSymbolWidth columns on the terminal.
 	AlertSymbol      string
 	AlertSymbolWidth int
+
+	// DropNotifications keeps the program's terminal notification commands
+	// (OSC 9, 99, 777) from reaching the terminal.
+	DropNotifications bool
 }
 
 // Attach connects the terminal in/out to the session at sock until the
@@ -124,6 +128,7 @@ func Attach(sock string, in, out *os.File, o AttachOptions) (Result, error) {
 	// The window title is the session's: saved, set, and given back on leaving.
 	// The program's own title commands are dropped, or they would replace it.
 	scr.HideTitles = true
+	scr.DropNotifications = o.DropNotifications
 	c.emitString("\x1b[22;0t\x1b]0;" + title(o.Project) + "\x07")
 	return c.run(winch)
 }

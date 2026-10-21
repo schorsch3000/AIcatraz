@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- New `notifications` section (also allowed in the user config). `shim: true` puts a `notify-send` in the jail that shows a notification on the host: only urgency, summary and body are passed on, cleaned, length-capped, rate-limited and audited. `osc: false` drops the agent's terminal notification sequences (OSC 9, 99, 777) in `up` sessions; they still pass by default.
+
 ## 0.7.0 (2026-10-20)
 
 - The image build uses `Dockerfile.az.dockerignore`, the ignore file docker reads for `Dockerfile.az`. The hidden-path check, the build-file pinning and the offer to add missing paths all use it; a plain `.dockerignore` is no longer checked.

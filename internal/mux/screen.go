@@ -51,6 +51,10 @@ type Screen struct {
 	// the title belongs to the session.
 	HideTitles bool
 
+	// DropNotifications drops the program's notification commands (OSC 9, 99
+	// and 777): they would make your terminal show a notification.
+	DropNotifications bool
+
 	out outParser
 }
 
@@ -273,10 +277,20 @@ func (s *Screen) Out(p []byte) []byte {
 // finishOSC decides what becomes of a complete operating system command: a
 // window title is dropped when titles are hidden, anything else goes through.
 func (s *Screen) finishOSC(seq []byte) []byte {
-	if s.isTitle(seq) {
+	if s.isTitle(seq) || (s.DropNotifications && isNotification(seq)) {
 		return nil
 	}
 	return seq
+}
+
+// isNotification reports whether seq (ESC ] ...) asks the terminal for a
+// notification: OSC 9 (iTerm2), OSC 99 (kitty) or OSC 777 (urxvt, VTE).
+func isNotification(seq []byte) bool {
+	if len(seq) < 4 || seq[0] != 0x1b || seq[1] != ']' {
+		return false
+	}
+	num, _, ok := strings.Cut(string(seq[2:]), ";")
+	return ok && (num == "9" || num == "99" || num == "777")
 }
 
 // isTitle reports whether seq (ESC ] ...) sets the window or icon title, and

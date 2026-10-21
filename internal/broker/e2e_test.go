@@ -1553,3 +1553,56 @@ func TestStdinFlowControlDeliversEverythingToASlowReader(t *testing.T) {
 		t.Fatalf("code %d, %d bytes back of %d", r.code, len(r.stdout), len(data))
 	}
 }
+
+// fakeNotify puts a notify-send on the host's PATH that records its arguments.
+func fakeNotify(t *testing.T) (dir string, opt func(*broker.Options)) {
+	t.Helper()
+	dir = t.TempDir()
+	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + dir + "/args\n"
+	if err := os.WriteFile(filepath.Join(dir, "notify-send"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir, func(o *broker.Options) { o.HostEnv = append(o.HostEnv, "PATH="+dir+":"+os.Getenv("PATH")) }
+}
+
+func TestNotifyShimShowsOnlyTextOnTheHost(t *testing.T) {
+	dir, opt := fakeNotify(t)
+	e := setup(t, "notifications: {shim: true}\n", func(o *broker.Options) {
+		o.HostEnv = []string{"HOME=/home/hosty"}
+		opt(o)
+	})
+	r := e.run("", "notify-send", "-u", "critical", "-h", "string:x:y", "-i", "evil", "--action=a", "Build <b>done</b>", "all\x1b[31m green\n& more")
+	if r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-a\nAIcatraz test\n-u\ncritical\n--\nBuild &lt;b&gt;done&lt;/b&gt;\nall[31m green &amp; more\n"
+	if string(got) != want {
+		t.Errorf("host got %q, want %q", got, want)
+	}
+	entries := e.auditEntries()
+	if last := entries[len(entries)-1]; last.Decision != "allow" || last.Name != "notify-send" {
+		t.Errorf("audit: %+v", last)
+	}
+}
+
+func TestNotifyShimIsOffByDefaultAndRateLimited(t *testing.T) {
+	_, opt := fakeNotify(t)
+	e := setup(t, "", opt)
+	if r := e.run("", "notify-send", "hi"); r.code != shim.ExitDenied {
+		t.Fatalf("without the option: %+v", r)
+	}
+	e = setup(t, "notifications: {shim: true}\n", opt)
+	denied := 0
+	for i := 0; i < 8; i++ {
+		if r := e.run("", "notify-send", "hi"); r.code == shim.ExitDenied && strings.Contains(r.stderr, "too many") {
+			denied++
+		}
+	}
+	if denied < 2 {
+		t.Errorf("only %d of 8 notifications were held back", denied)
+	}
+}

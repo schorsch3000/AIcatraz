@@ -18,7 +18,7 @@ import (
 // defaults), not what a project is or what its agent may touch: volumes, image,
 // host command rules, ports, devices and sudo stay in the project's file, so a
 // setting you forgot about can never widen a jail.
-var userSections = []string{"approval", "canary", "global", "agent", "limits", "env", "network", "bar", "init"}
+var userSections = []string{"approval", "canary", "global", "agent", "limits", "env", "network", "bar", "init", "notifications"}
 
 // UserConfigPath is where the user-wide config lives: $XDG_CONFIG_HOME/aicatraz/config.yaml,
 // or ~/.config/aicatraz/config.yaml. It is on the host and never mounted into a jail.

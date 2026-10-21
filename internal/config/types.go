@@ -34,6 +34,8 @@ type Config struct {
 	Bar      BarStyle  `yaml:"bar"`
 	Init     Init      `yaml:"init"`
 
+	Notifications Notifications `yaml:"notifications"`
+
 	// Sudo gives the user passwordless sudo in the jail (see docs/security.md
 	// for what that costs). Default off.
 	Sudo bool `yaml:"sudo"`
@@ -47,6 +49,18 @@ type Config struct {
 	// NetRules is filled in by validation: the network rules, parsed.
 	NetRules []egress.Rule `yaml:"-"`
 }
+
+// Notifications chooses how the agent's desktop notifications reach the host.
+type Notifications struct {
+	// Shim gives the jail a `notify-send` that shows a notification on the host.
+	Shim bool `yaml:"shim"`
+	// OSC lets the terminal notification sequences (OSC 9, 99 and 777) of the
+	// agent through to your terminal in an `up` session. Default on.
+	OSC *bool `yaml:"osc"`
+}
+
+// OSCOrDefault reports whether notification sequences reach the terminal.
+func (n Notifications) OSCOrDefault() bool { return n.OSC == nil || *n.OSC }
 
 // Init tunes what `aicatraz init` writes. It only has an effect in the user config.
 type Init struct {

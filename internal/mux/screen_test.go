@@ -427,3 +427,22 @@ func TestRainbowTheme(t *testing.T) {
 		t.Error("only the colors change as it turns")
 	}
 }
+
+func TestScreenDropsNotificationsOnRequest(t *testing.T) {
+	notes := []string{"\x1b]9;done\x07", "\x1b]777;notify;t;b\x1b\\", "\x1b]99;i=1;hi\x07"}
+	s := NewScreen(BarBottom, 30, 100)
+	for _, in := range notes {
+		if got := out(s, in); got != in {
+			t.Errorf("%q changed to %q", in, got)
+		}
+	}
+	s.DropNotifications = true
+	for _, in := range notes {
+		if got := out(s, "a"+in+"b"); got != "ab" {
+			t.Errorf("%q gave %q", in, got)
+		}
+	}
+	if in := "\x1b]8;;http://x\x1b\\l\x1b]8;;\x1b\\"; out(s, in) != in {
+		t.Error("a link is no notification")
+	}
+}

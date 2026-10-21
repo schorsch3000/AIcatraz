@@ -222,7 +222,7 @@ func Launch(o Options) (int, error) {
 	if err := writeIdentity(img.Ref, state, uid, gid, cur.Username, home); err != nil {
 		return 0, err
 	}
-	if err := WriteShimDir(ShimDir(state), ShimCommands(cfg.Rules)); err != nil {
+	if err := WriteShimDir(ShimDir(state), WithNotify(ShimCommands(cfg.Rules), cfg.Notifications)); err != nil {
 		return 0, err
 	}
 
