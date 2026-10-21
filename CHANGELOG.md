@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (2026-10-21)
 
 - New `notifications` section (also allowed in the user config). `shim: true` puts a `notify-send` in the jail that shows a notification on the host: only urgency, summary and body are passed on, cleaned, length-capped, rate-limited and audited. `osc: false` drops the agent's terminal notification sequences (OSC 9, 99, 777) in `up` sessions; they still pass by default.
 
