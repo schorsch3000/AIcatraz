@@ -175,3 +175,13 @@ func TestUserCopyValidation(t *testing.T) {
 		t.Fatalf("want 2 errors (escape, duplicate), got %v", problems)
 	}
 }
+
+func TestUserCopyIntoDirectory(t *testing.T) {
+	cfg, problems := Parse([]byte("copy:\n  - {from: /foo/bar/baz, to: ./foo/}\n  - {from: ~/rc, to: ./}\n  - {from: /foo/q, to: ../}\n"), Options{Home: "/h", Dir: "/h/.config/aicatraz"})
+	if len(problems) != 1 {
+		t.Fatalf("problems: %v", problems)
+	}
+	if len(cfg.CopyFiles) != 2 || cfg.CopyFiles[0].To != "foo/baz" || cfg.CopyFiles[1].To != "rc" {
+		t.Fatalf("copy files: %+v", cfg.CopyFiles)
+	}
+}

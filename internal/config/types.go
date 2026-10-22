@@ -60,7 +60,8 @@ type Config struct {
 type CopyFile struct {
 	// From is a file on the host: absolute, `~/...`, or relative to the user config's directory.
 	From string `yaml:"from"`
-	// To is the path inside the project directory (the one holding aicatraz.yaml).
+	// To is the path inside the project directory (the one holding .az/). One ending in
+	// `/` is a directory: the file keeps its name in it.
 	To string `yaml:"to"`
 }
 

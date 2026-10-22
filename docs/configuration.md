@@ -48,6 +48,7 @@ init:
 copy:
   - {from: ~/dotfiles/editorconfig, to: .editorconfig}   # `from`: absolute, ~/..., or relative to the user config's directory
   - {from: prompts/CLAUDE.md, to: CLAUDE.md}             # `to`: relative, inside the project
+  - {from: ~/dotfiles/lint.cfg, to: tools/}              # `to` ending in `/`: a directory, the file keeps its name (tools/lint.cfg)
 ```
 
 A key the project's file sets wins over the user's, key by key (`approval.timeout` in the project, `approval.idle` from you). `network` is the exception: if the project has a `network` section (even `network: off`), it replaces yours as a whole. Problems in the user config are reported when a project config is loaded, with the file's path.

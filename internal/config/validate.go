@@ -595,6 +595,14 @@ func (v *validator) copyFiles(c *Config) {
 			continue
 		}
 		to := path.Clean(filepath.ToSlash(f.To))
+		if strings.HasSuffix(f.To, "/") { // a directory: keep the file's name
+			base := filepath.Base(from)
+			if base == "/" || base == "." {
+				v.errorf(append(p, "from"), "%q has no file name to keep", f.From)
+				continue
+			}
+			to = path.Join(to, base)
+		}
 		if filepath.IsAbs(f.To) || to == "." || to == ".." || strings.HasPrefix(to, "../") {
 			v.errorf(append(p, "to"), "%q must be a path inside the project directory", f.To)
 			continue

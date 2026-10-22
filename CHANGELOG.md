@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- In the user config's `copy` section, a `to` ending in `/` is a directory: the file keeps its name in it (`{from: /foo/bar/baz, to: ./foo/}` makes `foo/baz`).
+
 ## 0.10.0 (2026-10-22)
 
 - `aicatraz init` puts its files in a `.az/` directory: `.az/aicatraz.yaml`, `.az/Dockerfile.az`, `.az/Dockerfile.az.dockerignore`. Relative paths in a config in `.az/` are relative to the project directory, so `.:rw` is still the project. The default config is `.az/aicatraz.yaml`; a project with the old layout keeps working, and in a terminal the commands offer to move its files into `.az/` (the project id, and so its state, stays the same; a moved `Dockerfile.az` is asked about once more).

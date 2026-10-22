@@ -89,10 +89,12 @@
 #       RUN apt update && apt upgrade -y # && apt install -y
 
 # ── COPY ─────────────────────────────────────────────────────────────────────
-# Files `aicatraz init` puts into the project directory (the one holding aicatraz.yaml),
+# Files `aicatraz init` puts into the project directory (the one holding .az/),
 # if they are not there yet. A target that exists is never overwritten.
 # `from` is a file on this machine: absolute, ~/..., or relative to this file's directory.
-# `to` is a path inside the project directory. Only the user config reads this section.
+# `to` is a path inside the project directory; one ending in / is a directory the file
+# goes into under its own name. Only the user config reads this section.
 # copy: []
 #   # - {from: ~/dotfiles/editorconfig, to: .editorconfig}
 #   # - {from: prompts/CLAUDE.md, to: CLAUDE.md}
+#   # - {from: ~/dotfiles/lint.cfg, to: tools/}      # becomes tools/lint.cfg
