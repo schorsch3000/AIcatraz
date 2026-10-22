@@ -26,7 +26,7 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
-const defaultConfig = "aicatraz.yaml"
+const defaultConfig = ".az/aicatraz.yaml" // config.DefaultFile
 
 const usage = `usage: {prog} <command> [flags]      ({prog} help <command> lists the flags of a command)
 
@@ -90,6 +90,12 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		}
 		args = append([]string{args[0]}, norm...)
 		if needsConfig[args[0]] {
+			if _, named := configArg(args[1:]); !named && isTerminalPair(stderr) {
+				if _, err := jail.OfferMigrate(".", os.Stdin, stderr); err != nil {
+					ui.Error(stderr, "%v", err)
+					return 2
+				}
+			}
 			if err := checkConfigExists(args[1:]); err != nil {
 				ui.Error(stderr, "%v", err)
 				return 2
@@ -248,7 +254,7 @@ func configCheck(file string, stdout, stderr io.Writer) int {
 }
 
 func launch(verb string, args []string, stdout, stderr io.Writer) int {
-	opts := jail.Options{ConfigPath: defaultConfig, Stdout: stdout, Stderr: stderr}
+	opts := jail.Options{ConfigPath: config.DefaultPath(), Stdout: stdout, Stderr: stderr}
 	agentVerb := verb == "claude" || verb == "opencode" || verb == "agent" || verb == "resume"
 	sessionVerb := verb == "up" || verb == "run" || agentVerb // verbs that can run as a session you can detach from
 	noSession := false
@@ -444,7 +450,7 @@ func styledUsage(st ui.Style) string {
 
 // runLog parses the flags of `aicatraz log`.
 func runLog(args []string, stdout, stderr io.Writer) int {
-	o := jail.LogOptions{ConfigPath: defaultConfig, Lines: 20}
+	o := jail.LogOptions{ConfigPath: config.DefaultPath(), Lines: 20}
 	if len(args) >= 2 && args[0] == "--config" {
 		o.ConfigPath, args = args[1], args[2:]
 	}

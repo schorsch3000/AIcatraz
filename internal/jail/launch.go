@@ -80,7 +80,7 @@ func Launch(o Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	cfgDir := filepath.Dir(cfgAbs)
+	cfgDir := config.ProjectDir(cfgAbs)
 	id, err := ProjectID(o.ConfigPath, cfg)
 	if err != nil {
 		return 0, err

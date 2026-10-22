@@ -1,7 +1,7 @@
 # Build and test inside the jail; deploy from the host, with a brake.
 volumes:
   - .:rw
-  - ./aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
+  - ./.az/aicatraz.yaml:hi   # this config: the agent can't read or change its own rules
 
 # No network in the jail: builds and tests run offline. (`network: open`, or
 # rules under `network:`, let it connect; see docs/configuration.md#network.)

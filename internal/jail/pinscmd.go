@@ -5,6 +5,7 @@ package jail
 import (
 	"errors"
 	"fmt"
+	"github.com/schorsch3000/aicatraz/internal/config"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ const pinsUsage = "usage: aicatraz pins [-c file] list\n" +
 // the project remembers, and make it forget some. A forgotten pin only means
 // the next run asks again, so nothing here needs a confirmation.
 func Pins(args []string, stdout, stderr io.Writer) error {
-	cfgPath := "aicatraz.yaml"
+	cfgPath := config.DefaultPath()
 	var rest []string
 	for len(args) > 0 {
 		if (args[0] == "-c" || args[0] == "--config") && len(args) >= 2 {

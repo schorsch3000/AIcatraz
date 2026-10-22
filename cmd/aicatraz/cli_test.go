@@ -230,7 +230,7 @@ func TestMissingConfigSaysWhatToDo(t *testing.T) {
 		if code := cli([]string{verb}, &out, &errb); code != 2 {
 			t.Errorf("%s: exit %d", verb, code)
 		}
-		if !strings.Contains(errb.String(), "no aicatraz.yaml in this directory; run `aicatraz init`") {
+		if !strings.Contains(errb.String(), "no .az/aicatraz.yaml in this directory; run `aicatraz init`") {
 			t.Errorf("%s: %q", verb, errb.String())
 		}
 	}

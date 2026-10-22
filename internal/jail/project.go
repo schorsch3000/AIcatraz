@@ -42,8 +42,12 @@ func ProjectID(cfgPath string, cfg *config.Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// A config in .az/ is named like the aicatraz.yaml it replaced, so moving
+	// a project into .az keeps its id (and with it its state and pins).
+	proj := config.ProjectDir(real)
+	real = filepath.Join(proj, config.FileName)
 	sum := sha256.Sum256([]byte(real))
-	return fmt.Sprintf("%s-%s", sanitize(filepath.Base(filepath.Dir(real))), hex.EncodeToString(sum[:])[:8]), nil
+	return fmt.Sprintf("%s-%s", sanitize(filepath.Base(proj)), hex.EncodeToString(sum[:])[:8]), nil
 }
 
 // StateDir is where AIcatraz keeps per-project state on the host, outside

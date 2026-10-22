@@ -40,7 +40,7 @@ func TestInitWritesAValidConfig(t *testing.T) {
 	if code := cli([]string{"init"}, &out, &errb); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	b, err := os.ReadFile(filepath.Join(dir, "aicatraz.yaml"))
+	b, err := os.ReadFile(filepath.Join(dir, ".az", "aicatraz.yaml"))
 	if err == nil && !strings.Contains(string(b), "  id: proj\n") {
 		t.Errorf("the example project id is the directory's name:\n%s", b)
 	}
@@ -62,7 +62,8 @@ func TestInitWritesAValidConfig(t *testing.T) {
 
 func TestInitNeverOverwritesUnlessAsked(t *testing.T) {
 	dir, _ := inDir(t)
-	cfg := filepath.Join(dir, "aicatraz.yaml")
+	os.MkdirAll(filepath.Join(dir, ".az"), 0o755)
+	cfg := filepath.Join(dir, ".az", "aicatraz.yaml")
 	os.WriteFile(cfg, []byte("# mine\n"), 0o644)
 	var out, errb bytes.Buffer
 	if code := cli([]string{"init", "--example", "claude"}, &out, &errb); code != 1 || !strings.Contains(errb.String(), "already exist") {
@@ -71,7 +72,7 @@ func TestInitNeverOverwritesUnlessAsked(t *testing.T) {
 	if b, _ := os.ReadFile(cfg); string(b) != "# mine\n" {
 		t.Error("the existing file was changed")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "Dockerfile.az")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, ".az", "Dockerfile.az")); err == nil {
 		t.Error("nothing at all may be written when something would be overwritten")
 	}
 	errb.Reset()
@@ -81,7 +82,7 @@ func TestInitNeverOverwritesUnlessAsked(t *testing.T) {
 	if b, _ := os.ReadFile(cfg); !strings.Contains(string(b), "tool: claude") {
 		t.Error("--force must overwrite")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "Dockerfile.az")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, ".az", "Dockerfile.az")); err != nil {
 		t.Error("the Dockerfile of the example must be written too")
 	}
 }
@@ -156,19 +157,19 @@ func TestInitDockerfile(t *testing.T) {
 	if code := cli([]string{"init"}, &out, &errb); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	b, _ := os.ReadFile(filepath.Join(dir, "Dockerfile.az"))
+	b, _ := os.ReadFile(filepath.Join(dir, ".az", "Dockerfile.az"))
 	if string(b) != "FROM debian:13\nRUN apt update && apt upgrade -y # && apt install -y\n" {
 		t.Errorf("Dockerfile.az = %q", b)
 	}
 
 	// No silent overwrite.
-	os.Remove("aicatraz.yaml")
-	os.WriteFile("Dockerfile.az", []byte("mine\n"), 0o644)
+	os.Remove(".az/aicatraz.yaml")
+	os.WriteFile(".az/Dockerfile.az", []byte("mine\n"), 0o644)
 	errb.Reset()
 	if code := cli([]string{"init"}, &out, &errb); code != 1 {
 		t.Errorf("existing file: exit %d", code)
 	}
-	if b, _ := os.ReadFile("Dockerfile.az"); string(b) != "mine\n" {
+	if b, _ := os.ReadFile(".az/Dockerfile.az"); string(b) != "mine\n" {
 		t.Errorf("file was overwritten: %q", b)
 	}
 	if code := cli([]string{"init", "--force"}, &out, &errb); code != 0 {
@@ -187,7 +188,7 @@ func TestInitDockerfileUnknownDistribution(t *testing.T) {
 	if code := cli([]string{"init"}, &out, &errb); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	b, _ := os.ReadFile(filepath.Join(dir, "Dockerfile.az"))
+	b, _ := os.ReadFile(filepath.Join(dir, ".az", "Dockerfile.az"))
 	if !strings.HasPrefix(string(b), "FROM debian:stable-slim\n") {
 		t.Errorf("Dockerfile.az = %q", b)
 	}
@@ -234,7 +235,7 @@ func TestInitDockerfileUserLines(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, errb.String())
 		}
-		if b, _ := os.ReadFile(filepath.Join(dir, "Dockerfile.az")); string(b) != c.want {
+		if b, _ := os.ReadFile(filepath.Join(dir, ".az", "Dockerfile.az")); string(b) != c.want {
 			t.Errorf("Dockerfile.az = %q, want %q", b, c.want)
 		}
 	}

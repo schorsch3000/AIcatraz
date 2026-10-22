@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
@@ -119,7 +120,7 @@ func configArg(args []string) (string, bool) {
 	if len(args) >= 2 && args[0] == "--config" {
 		return args[1], true
 	}
-	return defaultConfig, false
+	return config.DefaultPath(), false
 }
 
 // needsConfig lists the commands that read the project's config.
@@ -138,7 +139,7 @@ func checkConfigExists(args []string) error {
 	if named {
 		return fmt.Errorf("config file %s not found", path)
 	}
-	return fmt.Errorf("no %s in this directory; run `aicatraz init` to write one, or name a file with -c <file>", defaultConfig)
+	return fmt.Errorf("no %s in this directory; run `aicatraz init` to write one, or name a file with -c <file>", config.DefaultFile)
 }
 
 // badArgs reports a mistake in the command line and returns the exit code.

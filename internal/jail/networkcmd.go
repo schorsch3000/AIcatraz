@@ -22,7 +22,7 @@ const networkUsage = "usage: aicatraz network [-c file] list\n" +
 // project and the ones remembered for it, and change the remembered ones.
 // They apply to sessions that are running, too.
 func Network(args []string, stdout, stderr io.Writer) error {
-	cfgPath := "aicatraz.yaml"
+	cfgPath := config.DefaultPath()
 	var rest []string
 	for len(args) > 0 {
 		if (args[0] == "-c" || args[0] == "--config") && len(args) >= 2 {

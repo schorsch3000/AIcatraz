@@ -42,7 +42,7 @@ func LoadFile(path string, opts Options) (*Config, []Problem, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		opts.Dir = filepath.Dir(abs)
+		opts.Dir = ProjectDir(abs)
 	}
 	cfg, problems := Parse(data, opts)
 	return cfg, problems, nil

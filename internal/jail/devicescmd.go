@@ -16,7 +16,7 @@ import (
 // machine, with the names to write in a `devices` entry, and which of them the
 // config hands to the jail.
 func Devices(args []string, stdout, stderr io.Writer) error {
-	cfgPath := "aicatraz.yaml"
+	cfgPath := config.DefaultPath()
 	for len(args) > 0 {
 		if (args[0] == "-c" || args[0] == "--config") && len(args) >= 2 {
 			cfgPath = args[1]

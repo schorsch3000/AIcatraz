@@ -33,7 +33,7 @@ type Image struct {
 }
 
 // ResolveImage decides which image to use: an explicit reference; an explicit
-// or default (Dockerfile.az next to the config) build; or a built-in Debian.
+// or default (.az/Dockerfile.az, or Dockerfile.az in the project directory) build; or a built-in Debian.
 func ResolveImage(cfg *config.Config, cfgDir, id string) (Image, error) {
 	spec := cfg.Image
 	if spec.Ref != "" {
@@ -42,12 +42,13 @@ func ResolveImage(cfg *config.Config, cfgDir, id string) (Image, error) {
 
 	dockerfile := spec.Dockerfile
 	if dockerfile == "" {
-		if _, err := os.Stat(filepath.Join(cfgDir, defaultDockerfile)); err != nil {
-			if spec.Context == "" {
+		dockerfile = filepath.Join(config.AzDir, defaultDockerfile)
+		if _, err := os.Stat(filepath.Join(cfgDir, dockerfile)); err != nil {
+			dockerfile = defaultDockerfile // projects from before .az
+			if _, err := os.Stat(filepath.Join(cfgDir, dockerfile)); err != nil && spec.Context == "" {
 				return Image{Ref: defaultBaseImage}, nil
 			}
 		}
-		dockerfile = defaultDockerfile
 	}
 	b := &Build{
 		Dockerfile: absFrom(cfgDir, dockerfile),

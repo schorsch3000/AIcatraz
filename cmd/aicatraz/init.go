@@ -15,6 +15,9 @@ import (
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
+// azPath is where a file of the project's AIcatraz setup goes.
+func azPath(name string) string { return filepath.Join(config.AzDir, name) }
+
 // runInit writes a starter configuration into the current directory.
 func runInit(args []string, stdout, stderr io.Writer) int {
 	askUserConfig(stderr)
@@ -82,9 +85,12 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	// Never overwrite anything unasked.
 	var exists []string
 	for f := range files {
-		if _, err := os.Lstat(f); err == nil {
-			exists = append(exists, f)
+		if _, err := os.Lstat(azPath(f)); err == nil {
+			exists = append(exists, azPath(f))
 		}
+	}
+	if _, err := os.Lstat(config.FileName); err == nil {
+		exists = append(exists, config.FileName) // a project from before .az
 	}
 	if len(exists) > 0 && !force {
 		ui.Error(stderr, "%s already exist(s); nothing written (use --force to overwrite)", strings.Join(exists, ", "))
@@ -99,16 +105,21 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		if generated != "" {
 			order = append(append([]string(nil), order...), dockerfileName)
 		}
+		if err := os.MkdirAll(config.AzDir, 0o755); err != nil {
+			ui.Error(stderr, "%v", err)
+			return 2
+		}
 		for _, f := range order {
-			if err := os.WriteFile(f, []byte(files[f]), 0o644); err != nil {
+			p := azPath(f)
+			if err := os.WriteFile(p, []byte(files[f]), 0o644); err != nil {
 				ui.Error(stderr, "%v", err)
 				return 2
 			}
 			if f == dockerfileName && generated != "" {
-				fmt.Fprintf(stdout, "%s %s  (FROM %s)\n", st.BoldGreen("wrote"), f, generated)
+				fmt.Fprintf(stdout, "%s %s  (FROM %s)\n", st.BoldGreen("wrote"), p, generated)
 				continue
 			}
-			fmt.Fprintf(stdout, "%s %s\n", st.BoldGreen("wrote"), f)
+			fmt.Fprintf(stdout, "%s %s\n", st.BoldGreen("wrote"), p)
 		}
 	}
 	if dockerNote != "" {
@@ -116,12 +127,12 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// An empty ignore file for the image build; an existing one is kept.
-	if _, err := os.Lstat(ignoreFileName); err != nil {
-		if err := os.WriteFile(ignoreFileName, nil, 0o644); err != nil {
+	if _, err := os.Lstat(azPath(ignoreFileName)); err != nil {
+		if err := os.WriteFile(azPath(ignoreFileName), nil, 0o644); err != nil {
 			ui.Error(stderr, "%v", err)
 			return 2
 		}
-		fmt.Fprintf(stdout, "%s %s\n", st.BoldGreen("wrote"), ignoreFileName)
+		fmt.Fprintf(stdout, "%s %s\n", st.BoldGreen("wrote"), azPath(ignoreFileName))
 	}
 
 	// Files from the user config's `copy` section; existing ones are kept.
@@ -131,16 +142,16 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// The example must be a valid config; say so if it somehow isn't.
-	_, problems, err := config.LoadFile(examples.ConfigFile, config.Options{})
+	_, problems, err := config.LoadFile(config.DefaultFile, config.Options{})
 	if err == nil {
 		for _, p := range problems {
-			fmt.Fprintln(stderr, p.FormatStyled(examples.ConfigFile, ui.For(stderr)))
+			fmt.Fprintln(stderr, p.FormatStyled(config.DefaultFile, ui.For(stderr)))
 		}
 	}
 
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, st.Bold("Next:"))
-	fmt.Fprintf(stdout, "  1. edit %s to fit the project\n", examples.ConfigFile)
+	fmt.Fprintf(stdout, "  1. edit %s to fit the project\n", config.DefaultFile)
 	fmt.Fprintf(stdout, "  2. %s\n", st.Cyan(ui.Prog+" config check"))
 	switch name {
 	case "claude", "opencode":

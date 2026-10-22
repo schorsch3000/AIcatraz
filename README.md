@@ -51,7 +51,7 @@ It is one static binary with nothing else to install. To build it from source in
 
 ```bash
 cd ~/git/myproject
-aicatraz init                # writes aicatraz.yaml (asks about every connection); `init --list` shows other starters
+aicatraz init                # writes .az/aicatraz.yaml (asks about every connection); `init --list` shows other starters
 aicatraz config check        # checks it and warns about things that look unwise
 aicatraz run                 # a shell in the jail
 ```
@@ -61,10 +61,10 @@ You are now in a Debian container as yourself, with the project at the same path
 Then add a rule so the agent can do one useful thing on your machine, and see what happens when it asks:
 
 ```yaml
-# aicatraz.yaml
+# .az/aicatraz.yaml
 volumes:
   - .:rw                                  # the directory of this file
-  - ./aicatraz.yaml:hi                    # the agent can't read or edit its own rules
+  - ./.az/aicatraz.yaml:hi                # the agent can't read or edit its own rules
   - ./.env:hi                             # a secret it must not see
 
 network: open                             # without this section: no network
@@ -82,7 +82,7 @@ rules:
 Start an agent in it:
 
 ```bash
-aicatraz init --example claude --force    # a config and a Dockerfile.az for Claude Code
+aicatraz init --example claude --force    # a config and a Dockerfile.az in .az/ for Claude Code
 aicatraz claude                           # first run installs it; later runs just start it
 ```
 
@@ -109,7 +109,7 @@ Which one do I want? **`claude`** or **`opencode`** to work with an agent, **`up
 - **A hidden file must exist.** Otherwise the agent could create it, and then it would not be hidden any more.
 - **`up` starts below your command and leaves your screen alone.** The bar at the bottom is the status bar; `--status-bar off` removes it, `aicatraz bar-colors` lets you pick a colour.
 - **A prompt appeared out of nowhere.** That is the door doing its job. `y` runs it once, `s` for the session, `p` remembers it, `b` blocks it for good, anything else says no.
-- **The agent says a tool is missing.** The image is yours to fill: `Dockerfile.az` next to the config (`aicatraz init` writes a start, with a package upgrade line you can replace in the user config).
+- **The agent says a tool is missing.** The image is yours to fill: `.az/Dockerfile.az` (`aicatraz init` writes a start, with a package upgrade line you can replace in the user config).
 - **`aicatraz` refuses to run in the jail.** On purpose: the CLI is for the host only.
 
 ## Where to read more

@@ -1,6 +1,6 @@
 # Configuration reference
 
-The config is one YAML file, `aicatraz.yaml` by default. Unknown keys are errors, and `aicatraz config check` reports every problem with its line number. Everything is optional; an empty file is a valid config (an empty jail with nothing mounted).
+The config is one YAML file, `.az/aicatraz.yaml` by default. Relative paths in it (`./`, `../`) are relative to the project directory, the one holding `.az/`; for a config anywhere else, to the file's own directory. Unknown keys are errors, and `aicatraz config check` reports every problem with its line number. Everything is optional; an empty file is a valid config (an empty jail with nothing mounted).
 
 ```yaml
 project:    { id: ... }
@@ -42,7 +42,7 @@ init:
       RUN apt update && apt upgrade -y && apt install -y git curl
 ```
 
-`copy` puts files you always want into the project directory (the one holding `aicatraz.yaml`) when you run `aicatraz init` (not on later starts). A target that already exists is never overwritten, and nothing is copied over a symlink or through a directory that leads out of the project. A file that can't be copied is reported and skipped. Only the user config reads `copy`.
+`copy` puts files you always want into the project directory (the one holding `.az/`) when you run `aicatraz init` (not on later starts). A target that already exists is never overwritten, and nothing is copied over a symlink or through a directory that leads out of the project. A file that can't be copied is reported and skipped. Only the user config reads `copy`.
 
 ```yaml
 copy:
@@ -65,13 +65,13 @@ What the container is made from.
 ```yaml
 image: debian:13                 # a plain image reference, no build
 image:                           # or a build
-  dockerfile: Dockerfile.az      # default if the file exists next to the config
+  dockerfile: .az/Dockerfile.az   # default if the file exists
   context: .                     # build context, default: the config's directory
 ```
 
-With neither, `Dockerfile.az` next to the config is built if it exists; otherwise `debian:stable-slim` is used. The image is built on every start (Docker's cache makes that quick) and tagged per project.
+With neither, `.az/Dockerfile.az` (or a `Dockerfile.az` in the project directory, from before `.az`) is built if it exists; otherwise `debian:stable-slim` is used. The image is built on every start (Docker's cache makes that quick) and tagged per project.
 
-The build files (`Dockerfile.az`, the ignore files, and single files named by `COPY`/`ADD`) are pinned: a new or changed one needs your approval before the build. Every hidden path inside the build context must be excluded by `Dockerfile.az.dockerignore` (next to `Dockerfile.az`; `init` writes an empty one), otherwise the build is refused, since `COPY . /app` would put it in the image. In a terminal, `run` and `up` offer to add each missing path to the ignore file (creating `Dockerfile.az.dockerignore` if there is none): one question per file and path, every time, and only a yes changes anything. Without a terminal, or with `--print`, nothing is asked or written and the build is refused. If a project has a `.dockerignore` but no `Dockerfile.az.dockerignore`, `run` and `up` ask in a terminal whether to rename it or create a blank `Dockerfile.az.dockerignore`. Docker (BuildKit) reads `Dockerfile.az.dockerignore` instead of `.dockerignore` for a build with `Dockerfile.az`.
+The build files (`Dockerfile.az`, the ignore files, and single files named by `COPY`/`ADD`) are pinned: a new or changed one needs your approval before the build. Every hidden path inside the build context must be excluded by `Dockerfile.az.dockerignore` (next to `Dockerfile.az`, in `.az/`; `init` writes an empty one), otherwise the build is refused, since `COPY . /app` would put it in the image. In a terminal, `run` and `up` offer to add each missing path to the ignore file (creating `Dockerfile.az.dockerignore` if there is none): one question per file and path, every time, and only a yes changes anything. Without a terminal, or with `--print`, nothing is asked or written and the build is refused. If a project has a `.dockerignore` but no `Dockerfile.az.dockerignore`, `run` and `up` ask in a terminal whether to rename it or create a blank `Dockerfile.az.dockerignore`. Docker (BuildKit) reads `Dockerfile.az.dockerignore` instead of `.dockerignore` for a build with `Dockerfile.az`.
 
 The image's `ENTRYPOINT` and `CMD` are replaced. The container runs as your UID and GID whatever the image's `USER` says.
 

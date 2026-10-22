@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `aicatraz init` puts its files in a `.az/` directory: `.az/aicatraz.yaml`, `.az/Dockerfile.az`, `.az/Dockerfile.az.dockerignore`. Relative paths in a config in `.az/` are relative to the project directory, so `.:rw` is still the project. The default config is `.az/aicatraz.yaml`; a project with the old layout keeps working, and in a terminal the commands offer to move its files into `.az/` (the project id, and so its state, stays the same; a moved `Dockerfile.az` is asked about once more).
+
 ## 0.9.0 (2026-10-22)
 
 - `aicatraz init dockerfile` is gone: `aicatraz init` always writes a `Dockerfile.az` (the example's own, else one for this machine's distribution, `debian:stable-slim` if that is unknown). `init.dockerfile.lines` in the user config still tunes it.
