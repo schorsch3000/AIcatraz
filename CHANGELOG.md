@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.1 (2026-10-22)
 
 - In the user config's `copy` section, a `to` ending in `/` is a directory: the file keeps its name in it (`{from: /foo/bar/baz, to: ./foo/}` makes `foo/baz`).
 
