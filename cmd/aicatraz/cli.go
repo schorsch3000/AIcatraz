@@ -51,8 +51,7 @@ Look and change
                              the cached agent executables
 
 Set up and maintain
-  init [--example name]      write a starter ` + defaultConfig + ` here (--list shows the starters)
-  init dockerfile            write a Dockerfile.az for the distribution this machine runs
+  init [--example name]      write a starter ` + defaultConfig + ` and a Dockerfile.az here (--list shows the starters)
   config check [file]        validate a config (default: ` + defaultConfig + `)
   doctor                     check that Docker and the rest are in order
   clean                      remove state of projects whose directory is gone

@@ -23,7 +23,7 @@ agent:      { tool: claude, version: latest, skip_permissions: true }
 
 ## The user config
 
-Settings that are about you, not the project, can go into `~/.config/aicatraz/config.yaml` (or `$XDG_CONFIG_HOME/aicatraz/config.yaml`). The first time you run `init`, `run`, `up`, `claude`, `opencode`, `agent`, `shell`, `down` or `resume` (not with `--print`) from a terminal and there is no such file, AIcatraz asks whether to write one with every setting commented out at its default (Enter says yes). It never writes it without asking, never when nobody can answer (a script, a pipe), and never touches an existing file. If you say no it remembers that (`~/.config/aicatraz/.no-user-config`; remove that file to be asked again). It is read from the host and never mounted into a jail. It has the same format as the project's file, and may hold only `approval`, `canary`, `global`, `agent`, `limits`, `env`, `network`, `bar` and `init`; anything else (volumes, image, rules, ports, devices, `sudo`, `project`) is an error, so a setting you forgot about can't add mounts, host commands, ports, devices or root to a jail. `network` can still widen one: `network: open` there applies to every project without its own `network` section.
+Settings that are about you, not the project, can go into `~/.config/aicatraz/config.yaml` (or `$XDG_CONFIG_HOME/aicatraz/config.yaml`). The first time you run `init`, `run`, `up`, `claude`, `opencode`, `agent`, `shell`, `down` or `resume` (not with `--print`) from a terminal and there is no such file, AIcatraz asks whether to write one with every setting commented out at its default (Enter says yes). It never writes it without asking, never when nobody can answer (a script, a pipe), and never touches an existing file. If you say no it remembers that (`~/.config/aicatraz/.no-user-config`; remove that file to be asked again). It is read from the host and never mounted into a jail. It has the same format as the project's file, and may hold only `approval`, `canary`, `global`, `agent`, `limits`, `env`, `network`, `bar`, `init`, `notifications` and `copy`; anything else (volumes, image, rules, ports, devices, `sudo`, `project`) is an error, so a setting you forgot about can't add mounts, host commands, ports, devices or root to a jail. `network` can still widen one: `network: open` there applies to every project without its own `network` section.
 
 ```yaml
 # ~/.config/aicatraz/config.yaml
@@ -33,13 +33,21 @@ bar: { theme: random, symbol: "⚠️", symbol_width: 2 }
 network: { default: ask }
 ```
 
-`init.dockerfile.lines` replaces the package upgrade line that `aicatraz init dockerfile` writes after `FROM` (only the user config is read for this). Without it the line for your distribution is written; `""` writes none.
+`init.dockerfile.lines` replaces the package upgrade line that `aicatraz init` writes after `FROM` (only the user config is read for this). Without it the line for your distribution is written; `""` writes none.
 
 ```yaml
 init:
   dockerfile:
     lines: |
       RUN apt update && apt upgrade -y && apt install -y git curl
+```
+
+`copy` puts files you always want into the project directory (the one holding `aicatraz.yaml`) when you run `aicatraz init` (not on later starts). A target that already exists is never overwritten, and nothing is copied over a symlink or through a directory that leads out of the project. A file that can't be copied is reported and skipped. Only the user config reads `copy`.
+
+```yaml
+copy:
+  - {from: ~/dotfiles/editorconfig, to: .editorconfig}   # `from`: absolute, ~/..., or relative to the user config's directory
+  - {from: prompts/CLAUDE.md, to: CLAUDE.md}             # `to`: relative, inside the project
 ```
 
 A key the project's file sets wins over the user's, key by key (`approval.timeout` in the project, `approval.idle` from you). `network` is the exception: if the project has a `network` section (even `network: off`), it replaces yours as a whole. Problems in the user config are reported when a project config is loaded, with the file's path.

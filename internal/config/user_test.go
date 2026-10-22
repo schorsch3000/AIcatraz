@@ -156,3 +156,22 @@ func TestBarSymbol(t *testing.T) {
 		t.Error("an empty symbol means no symbol")
 	}
 }
+
+func TestUserCopyValidation(t *testing.T) {
+	cfg, problems := Parse([]byte("copy:\n  - {from: ~/a, to: x/y}\n  - {from: ~/a, to: ../z}\n  - {from: ~/a, to: x/y}\n"), Options{Home: "/h", Dir: "/h/.config/aicatraz"})
+	if cfg == nil {
+		t.Fatal("nil config")
+	}
+	if len(cfg.CopyFiles) != 1 || cfg.CopyFiles[0].From != "/h/a" || cfg.CopyFiles[0].To != "x/y" {
+		t.Fatalf("copy files: %+v", cfg.CopyFiles)
+	}
+	errs := 0
+	for _, p := range problems {
+		if p.Severity == Error {
+			errs++
+		}
+	}
+	if errs != 2 {
+		t.Fatalf("want 2 errors (escape, duplicate), got %v", problems)
+	}
+}

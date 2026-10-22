@@ -4,13 +4,11 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/osrelease"
-	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 // osReleasePath is where the running distribution describes itself.
@@ -21,50 +19,29 @@ const dockerfileName = "Dockerfile.az"
 // ignoreFileName is the ignore file docker reads for it (BuildKit).
 const ignoreFileName = dockerfileName + ".dockerignore"
 
-// runInitDockerfile writes a short Dockerfile.az whose base image matches
-// the distribution this machine runs, with a line that upgrades its packages.
-func runInitDockerfile(args []string, stdout, stderr io.Writer) int {
-	force := false
-	for _, a := range args {
-		if a != "--force" {
-			return badArgs(stderr, unexpected("init", a))
-		}
-		force = true
-	}
-	st := ui.For(stdout)
+// fallbackImage is what the Dockerfile.az is based on when the distribution
+// of this machine is unknown; it is also what a project without one gets.
+const fallbackImage = "debian:stable-slim"
 
-	f, err := os.Open(osReleasePath)
-	if err != nil {
-		ui.Error(stderr, "cannot detect the distribution (%v); write a `FROM <image>` line into %s yourself", err, dockerfileName)
-		return 1
+// generatedDockerfile returns a short Dockerfile.az whose base image matches
+// the distribution this machine runs, with a line that upgrades its packages.
+// note is a hint worth showing. An unknown distribution gets fallbackImage.
+func generatedDockerfile() (content, image, note string, err error) {
+	rel := map[string]string{}
+	if f, oerr := os.Open(osReleasePath); oerr == nil {
+		rel = osrelease.Parse(f)
+		f.Close()
 	}
-	defer f.Close()
-	rel := osrelease.Parse(f)
 	image, note, ok := baseImage(rel)
 	if !ok {
-		ui.Error(stderr, "no matching base image for this distribution; write a `FROM <image>` line into %s yourself", dockerfileName)
-		return 1
+		image, note = fallbackImage, "could not match this distribution to a base image; "+dockerfileName+" is based on "+fallbackImage
+		rel = map[string]string{"ID": "debian"}
 	}
-
 	upgrade, err := upgradeLines(rel)
 	if err != nil {
-		ui.Error(stderr, "%v", err)
-		return 1
+		return "", "", "", err
 	}
-
-	if _, err := os.Lstat(dockerfileName); err == nil && !force {
-		ui.Error(stderr, "%s already exists; nothing written (use --force to overwrite)", dockerfileName)
-		return 1
-	}
-	if err := os.WriteFile(dockerfileName, []byte("FROM "+image+"\n"+upgrade), 0o644); err != nil {
-		ui.Error(stderr, "%v", err)
-		return 2
-	}
-	fmt.Fprintf(stdout, "%s %s  (FROM %s)\n", st.BoldGreen("wrote"), dockerfileName, image)
-	if note != "" {
-		ui.Note(stderr, "%s", note)
-	}
-	return 0
+	return "FROM " + image + "\n" + upgrade, image, note, nil
 }
 
 // major returns the part of a version before the first dot.

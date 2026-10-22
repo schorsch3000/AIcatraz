@@ -153,7 +153,7 @@ func TestInitDockerfile(t *testing.T) {
 	defer func() { osReleasePath = old }()
 
 	var out, errb bytes.Buffer
-	if code := cli([]string{"init", "dockerfile"}, &out, &errb); code != 0 {
+	if code := cli([]string{"init"}, &out, &errb); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "Dockerfile.az"))
@@ -162,16 +162,34 @@ func TestInitDockerfile(t *testing.T) {
 	}
 
 	// No silent overwrite.
+	os.Remove("aicatraz.yaml")
 	os.WriteFile("Dockerfile.az", []byte("mine\n"), 0o644)
 	errb.Reset()
-	if code := cli([]string{"init", "dockerfile"}, &out, &errb); code != 1 {
+	if code := cli([]string{"init"}, &out, &errb); code != 1 {
 		t.Errorf("existing file: exit %d", code)
 	}
 	if b, _ := os.ReadFile("Dockerfile.az"); string(b) != "mine\n" {
 		t.Errorf("file was overwritten: %q", b)
 	}
-	if code := cli([]string{"init", "dockerfile", "--force"}, &out, &errb); code != 0 {
+	if code := cli([]string{"init", "--force"}, &out, &errb); code != 0 {
 		t.Errorf("--force: exit %d", code)
+	}
+}
+
+func TestInitDockerfileUnknownDistribution(t *testing.T) {
+	dir, _ := inDir(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	old := osReleasePath
+	osReleasePath = filepath.Join(t.TempDir(), "missing")
+	defer func() { osReleasePath = old }()
+	var out, errb bytes.Buffer
+	if code := cli([]string{"init"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "Dockerfile.az"))
+	if !strings.HasPrefix(string(b), "FROM debian:stable-slim\n") {
+		t.Errorf("Dockerfile.az = %q", b)
 	}
 }
 
@@ -211,7 +229,7 @@ func TestInitDockerfileUserLines(t *testing.T) {
 		old := osReleasePath
 		osReleasePath = rel
 		var out, errb bytes.Buffer
-		code := cli([]string{"init", "dockerfile"}, &out, &errb)
+		code := cli([]string{"init"}, &out, &errb)
 		osReleasePath = old
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, errb.String())

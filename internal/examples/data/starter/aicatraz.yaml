@@ -23,7 +23,7 @@ project:
   id: {{PROJECT}}
 
 # The image the jail runs in. By default: Dockerfile.az next to this file if there is
-# one (`aicatraz init dockerfile` writes one), else a plain Debian.
+# one (`aicatraz init` writes one), else a plain Debian.
 # image: debian:13                 # an image to use as it is
 # image:                           # or a build
 #   dockerfile: Dockerfile.az

@@ -18,7 +18,7 @@ func TestCompletionScripts(t *testing.T) {
 			t.Fatalf("%s: exit %d: %s", shell, code, errb.String())
 		}
 		s := out.String()
-		for _, want := range []string{"aicatraz", "az", "resume", "dockerfile", "deploy-with-make", "opencode", "approve-build"} {
+		for _, want := range []string{"aicatraz", "az", "resume", "deploy-with-make", "opencode", "approve-build"} {
 			if !strings.Contains(s, want) {
 				t.Errorf("%s script lacks %q", shell, want)
 			}

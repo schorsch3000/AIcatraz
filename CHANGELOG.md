@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `aicatraz init dockerfile` is gone: `aicatraz init` always writes a `Dockerfile.az` (the example's own, else one for this machine's distribution, `debian:stable-slim` if that is unknown). `init.dockerfile.lines` in the user config still tunes it.
+- New `copy` section in the user config: files that `aicatraz init` puts into the project directory, unless the target already exists. Never overwrites, and refuses to write through a symlink that leads out of the project.
+
 ## 0.8.0 (2026-10-21)
 
 - New `notifications` section (also allowed in the user config). `shim: true` puts a `notify-send` in the jail that shows a notification on the host: only urgency, summary and body are passed on, cleaned, length-capped, rate-limited and audited. `osc: false` drops the agent's terminal notification sequences (OSC 9, 99, 777) in `up` sessions; they still pass by default.

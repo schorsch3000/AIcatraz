@@ -36,6 +36,10 @@ type Config struct {
 
 	Notifications Notifications `yaml:"notifications"`
 
+	// Copy lists files put into the project directory at launch when they are
+	// not there yet. It only has an effect in the user config.
+	Copy []CopyFile `yaml:"copy"`
+
 	// Sudo gives the user passwordless sudo in the jail (see docs/security.md
 	// for what that costs). Default off.
 	Sudo bool `yaml:"sudo"`
@@ -48,6 +52,16 @@ type Config struct {
 	PortMaps []PortMap `yaml:"-"`
 	// NetRules is filled in by validation: the network rules, parsed.
 	NetRules []egress.Rule `yaml:"-"`
+	// CopyFiles is filled in by validation: the copy entries with From made absolute.
+	CopyFiles []CopyFile `yaml:"-"`
+}
+
+// CopyFile is one file of the user config's `copy` section.
+type CopyFile struct {
+	// From is a file on the host: absolute, `~/...`, or relative to the user config's directory.
+	From string `yaml:"from"`
+	// To is the path inside the project directory (the one holding aicatraz.yaml).
+	To string `yaml:"to"`
 }
 
 // Notifications chooses how the agent's desktop notifications reach the host.
@@ -67,7 +81,7 @@ type Init struct {
 	Dockerfile InitDockerfile `yaml:"dockerfile"`
 }
 
-// InitDockerfile tunes `aicatraz init dockerfile`.
+// InitDockerfile tunes the Dockerfile.az `aicatraz init` writes.
 type InitDockerfile struct {
 	// Lines replace the package upgrade line that follows FROM. Nil keeps the
 	// distribution's default; an empty string writes no line.

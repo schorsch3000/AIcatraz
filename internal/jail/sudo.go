@@ -24,7 +24,7 @@ var SudoCaps = []string{
 func SudoRef(id string) string { return "aicatraz/" + id + ":sudo" }
 
 // installers maps a distribution ID to the command that installs sudo. The
-// twelve distributions `init dockerfile` knows are covered; others have to
+// twelve distributions `init` writes a Dockerfile.az for are covered; others have to
 // bring sudo themselves.
 var installers = map[string]string{
 	"debian":              "apt-get update && apt-get install -y --no-install-recommends sudo && rm -rf /var/lib/apt/lists/*",

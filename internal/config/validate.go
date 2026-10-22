@@ -88,6 +88,7 @@ func (v *validator) validate(c *Config) {
 	v.ports(c)
 	v.devices(c)
 	v.bar(c)
+	v.copyFiles(c)
 }
 
 func (v *validator) project(c *Config) {
@@ -577,5 +578,32 @@ func (v *validator) bar(c *Config) {
 		if _, err := mux.ParseColor(b.BG, true); err != nil {
 			v.errorf([]any{"bar", "bg"}, "%v", err)
 		}
+	}
+}
+
+func (v *validator) copyFiles(c *Config) {
+	seen := map[string]bool{}
+	for i, f := range c.Copy {
+		p := []any{"copy", i}
+		if f.From == "" || f.To == "" {
+			v.errorf(p, "copy needs both `from` and `to`")
+			continue
+		}
+		from, err := v.expandHome(f.From)
+		if err != nil {
+			v.errorf(append(p, "from"), "%v", err)
+			continue
+		}
+		to := path.Clean(filepath.ToSlash(f.To))
+		if filepath.IsAbs(f.To) || to == "." || to == ".." || strings.HasPrefix(to, "../") {
+			v.errorf(append(p, "to"), "%q must be a path inside the project directory", f.To)
+			continue
+		}
+		if seen[to] {
+			v.errorf(append(p, "to"), "%q is already the target of another entry", f.To)
+			continue
+		}
+		seen[to] = true
+		c.CopyFiles = append(c.CopyFiles, CopyFile{From: from, To: to})
 	}
 }

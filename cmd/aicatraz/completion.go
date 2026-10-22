@@ -77,11 +77,11 @@ var completionVerbs = []cverb{
 	{name: "devices", args: "[flags]", desc: "list USB devices and what the jail gets", flags: []cflag{flagConfig}},
 	{name: "network", args: "[flags] list | allow|deny <host|ip|cidr|*> [--ports 22,443,8000-8080|*] | forget <number> | --all", desc: "show or change the network rules", flags: []cflag{flagConfig, {"", "ports", "value", "ports to allow or deny"}, {"", "all", "", "forget every remembered rule"}}, first: []string{"list", "allow", "deny", "forget"}},
 	{name: "pins", args: "[flags] list | diff [<path>...] | forget <path>... | --missing | --all", desc: "list or forget approved file versions", flags: []cflag{flagConfig, {"", "all", "", "forget every pin"}, {"", "missing", "", "forget pins of files that are gone"}}, first: []string{"list", "diff", "forget"}, later: "file"},
-	{name: "init", args: "[--example name] [--list] [--force] | dockerfile [--force]", desc: "write a starter config or Dockerfile.az", flags: []cflag{
+	{name: "init", args: "[--example name] [--list] [--force]", desc: "write a starter config and Dockerfile.az", flags: []cflag{
 		{"e", "example", "example", "starter to write"},
 		{"", "list", "", "list the starters"},
 		{"", "force", "", "overwrite existing files"},
-	}, first: []string{"dockerfile"}},
+	}},
 	{name: "config", args: "check [-c] [file]", desc: "validate a config", flags: []cflag{flagConfig}, first: []string{"check"}, later: "file"},
 	{name: "completion", args: "bash|zsh|fish", desc: "print shell completion code to source", first: completionShells},
 	{name: "version", args: "", desc: "print the version"},

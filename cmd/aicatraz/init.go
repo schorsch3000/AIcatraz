@@ -11,15 +11,13 @@ import (
 
 	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/examples"
+	"github.com/schorsch3000/aicatraz/internal/jail"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
 // runInit writes a starter configuration into the current directory.
 func runInit(args []string, stdout, stderr io.Writer) int {
 	askUserConfig(stderr)
-	if len(args) > 0 && args[0] == "dockerfile" {
-		return runInitDockerfile(args[1:], stdout, stderr)
-	}
 	name, force, list := "starter", false, false
 	for len(args) > 0 {
 		switch a := args[0]; {
@@ -37,6 +35,7 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	st := ui.For(stdout)
+	var generated string // base image of the Dockerfile.az init generates
 
 	if list {
 		for _, e := range examples.List() {
@@ -68,6 +67,18 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// An example without a Dockerfile.az gets one for this machine's distribution.
+	var dockerNote string
+	if _, ok := files[dockerfileName]; !ok {
+		content, image, note, err := generatedDockerfile()
+		if err != nil {
+			ui.Error(stderr, "%v", err)
+			return 2
+		}
+		files[dockerfileName], dockerNote = content, note
+		generated = image
+	}
+
 	// Never overwrite anything unasked.
 	var exists []string
 	for f := range files {
@@ -84,13 +95,24 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		if ex.Name != name {
 			continue
 		}
-		for _, f := range ex.Files { // config first, then the rest, in a stable order
+		order := ex.Files // config first, then the rest, in a stable order
+		if generated != "" {
+			order = append(append([]string(nil), order...), dockerfileName)
+		}
+		for _, f := range order {
 			if err := os.WriteFile(f, []byte(files[f]), 0o644); err != nil {
 				ui.Error(stderr, "%v", err)
 				return 2
 			}
+			if f == dockerfileName && generated != "" {
+				fmt.Fprintf(stdout, "%s %s  (FROM %s)\n", st.BoldGreen("wrote"), f, generated)
+				continue
+			}
 			fmt.Fprintf(stdout, "%s %s\n", st.BoldGreen("wrote"), f)
 		}
+	}
+	if dockerNote != "" {
+		ui.Note(stderr, "%s", dockerNote)
 	}
 
 	// An empty ignore file for the image build; an existing one is kept.
@@ -100,6 +122,12 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		fmt.Fprintf(stdout, "%s %s\n", st.BoldGreen("wrote"), ignoreFileName)
+	}
+
+	// Files from the user config's `copy` section; existing ones are kept.
+	if err := jail.CopyUserFiles(home, cwd, stdout, stderr); err != nil {
+		ui.Error(stderr, "%v", err)
+		return 2
 	}
 
 	// The example must be a valid config; say so if it somehow isn't.
