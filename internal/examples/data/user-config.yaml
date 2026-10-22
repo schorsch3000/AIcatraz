@@ -88,6 +88,12 @@
 #     lines: |
 #       RUN apt update && apt upgrade -y # && apt install -y
 
+# ── SETUP ────────────────────────────────────────────────────────────────────
+# Shell commands run in the jail before the agent or shell starts, as the jail's
+# user (same mounts, environment and limits; no root). One that fails stops the
+# launch. The commands must exist in the image. A `setup` in a project replaces this one.
+# setup: []                      # for example [gb-ensure-bender]
+
 # ── COPY ─────────────────────────────────────────────────────────────────────
 # Files `aicatraz init` puts into the project directory (the one holding .az/),
 # if they are not there yet. A target that exists is never overwritten.

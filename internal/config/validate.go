@@ -89,6 +89,7 @@ func (v *validator) validate(c *Config) {
 	v.devices(c)
 	v.bar(c)
 	v.copyFiles(c)
+	v.setup(c)
 }
 
 func (v *validator) project(c *Config) {
@@ -613,5 +614,13 @@ func (v *validator) copyFiles(c *Config) {
 		}
 		seen[to] = true
 		c.CopyFiles = append(c.CopyFiles, CopyFile{From: from, To: to})
+	}
+}
+
+func (v *validator) setup(c *Config) {
+	for i, cmd := range c.Setup {
+		if strings.TrimSpace(cmd) == "" {
+			v.errorf([]any{"setup", i}, "setup[%d] is empty", i)
+		}
 	}
 }

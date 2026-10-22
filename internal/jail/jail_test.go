@@ -545,3 +545,20 @@ func TestWithNotify(t *testing.T) {
 		t.Errorf("off adds nothing: %v", got)
 	}
 }
+
+func TestRunArgsSetupWrapsTheCommand(t *testing.T) {
+	in := testInput(t, "volumes:\n  - ~/p:rw\nsetup:\n  - one\n  - two\n")
+	in.Command = []string{"claude", "--flag"}
+	args, err := RunArgs(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has(args, "debian:stable-slim", "/bin/sh", "-c", "set -e\none\ntwo\nexec \"$@\"", "aicatraz-setup", "claude", "--flag") {
+		t.Errorf("setup must run before the command, got %v", args)
+	}
+	in = testInput(t, "volumes:\n  - ~/p:rw\n")
+	in.Command = []string{"claude"}
+	if args, _ = RunArgs(in); args[len(args)-1] != "claude" || slices.Contains(args, "aicatraz-setup") {
+		t.Errorf("no setup, no wrapper: %v", args)
+	}
+}

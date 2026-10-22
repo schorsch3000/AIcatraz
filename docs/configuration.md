@@ -23,7 +23,7 @@ agent:      { tool: claude, version: latest, skip_permissions: true }
 
 ## The user config
 
-Settings that are about you, not the project, can go into `~/.config/aicatraz/config.yaml` (or `$XDG_CONFIG_HOME/aicatraz/config.yaml`). The first time you run `init`, `run`, `up`, `claude`, `opencode`, `agent`, `shell`, `down` or `resume` (not with `--print`) from a terminal and there is no such file, AIcatraz asks whether to write one with every setting commented out at its default (Enter says yes). It never writes it without asking, never when nobody can answer (a script, a pipe), and never touches an existing file. If you say no it remembers that (`~/.config/aicatraz/.no-user-config`; remove that file to be asked again). It is read from the host and never mounted into a jail. It has the same format as the project's file, and may hold only `approval`, `canary`, `global`, `agent`, `limits`, `env`, `network`, `bar`, `init`, `notifications` and `copy`; anything else (volumes, image, rules, ports, devices, `sudo`, `project`) is an error, so a setting you forgot about can't add mounts, host commands, ports, devices or root to a jail. `network` can still widen one: `network: open` there applies to every project without its own `network` section.
+Settings that are about you, not the project, can go into `~/.config/aicatraz/config.yaml` (or `$XDG_CONFIG_HOME/aicatraz/config.yaml`). The first time you run `init`, `run`, `up`, `claude`, `opencode`, `agent`, `shell`, `down` or `resume` (not with `--print`) from a terminal and there is no such file, AIcatraz asks whether to write one with every setting commented out at its default (Enter says yes). It never writes it without asking, never when nobody can answer (a script, a pipe), and never touches an existing file. If you say no it remembers that (`~/.config/aicatraz/.no-user-config`; remove that file to be asked again). It is read from the host and never mounted into a jail. It has the same format as the project's file, and may hold only `approval`, `canary`, `global`, `agent`, `limits`, `env`, `network`, `bar`, `init`, `notifications`, `copy` and `setup`; anything else (volumes, image, rules, ports, devices, `sudo`, `project`) is an error, so a setting you forgot about can't add mounts, host commands, ports, devices or root to a jail. `network` can still widen one: `network: open` there applies to every project without its own `network` section.
 
 ```yaml
 # ~/.config/aicatraz/config.yaml
@@ -75,6 +75,16 @@ With neither, `.az/Dockerfile.az` (or a `Dockerfile.az` in the project directory
 The build files (`Dockerfile.az`, the ignore files, and single files named by `COPY`/`ADD`) are pinned: a new or changed one needs your approval before the build. Every hidden path inside the build context must be excluded by `Dockerfile.az.dockerignore` (next to `Dockerfile.az`, in `.az/`; `init` writes an empty one), otherwise the build is refused, since `COPY . /app` would put it in the image. In a terminal, `run` and `up` offer to add each missing path to the ignore file (creating `Dockerfile.az.dockerignore` if there is none): one question per file and path, every time, and only a yes changes anything. Without a terminal, or with `--print`, nothing is asked or written and the build is refused. If a project has a `.dockerignore` but no `Dockerfile.az.dockerignore`, `run` and `up` ask in a terminal whether to rename it or create a blank `Dockerfile.az.dockerignore`. Docker (BuildKit) reads `Dockerfile.az.dockerignore` instead of `.dockerignore` for a build with `Dockerfile.az`.
 
 The image's `ENTRYPOINT` and `CMD` are replaced. The container runs as your UID and GID whatever the image's `USER` says.
+
+## `setup`
+
+```yaml
+setup:
+  - gb-ensure-bender
+  - git config --global pull.rebase true
+```
+
+Shell commands run inside the jail, in order, right before the agent or shell starts. They run as your UID and GID with the jail's mounts, environment, `--read-only` root and empty capability set, so a hook can prepare the home directory, per-repo state and generated config but cannot do anything root-only (bake that into `Dockerfile.az`). Each entry is a line of `sh`; the script runs with `set -e`, so a failing command stops the launch before the agent starts. The agent is then `exec`'d and keeps the terminal and signals. A script you call must be in the image or in a read-only volume: one the agent can write is one the agent controls. It may be set in the user config (applies to every project without its own `setup`) or in the project file, which replaces it.
 
 ## `volumes`
 

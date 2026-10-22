@@ -18,7 +18,7 @@ import (
 // defaults), not what a project is or what its agent may touch: volumes, image,
 // host command rules, ports, devices and sudo stay in the project's file, so a
 // setting you forgot about can never widen a jail.
-var userSections = []string{"approval", "canary", "global", "agent", "limits", "env", "network", "bar", "init", "notifications", "copy"}
+var userSections = []string{"approval", "canary", "global", "agent", "limits", "env", "network", "bar", "init", "notifications", "copy", "setup"}
 
 // UserConfigPath is where the user-wide config lives: $XDG_CONFIG_HOME/aicatraz/config.yaml,
 // or ~/.config/aicatraz/config.yaml. It is on the host and never mounted into a jail.
@@ -138,9 +138,12 @@ func applyUser(dst, src *Config, root *yaml.Node) {
 	if !present(root, "network") && src.Network != nil {
 		dst.Network, dst.NetRules = src.Network, src.NetRules
 	}
+	if !present(root, "setup") {
+		dst.Setup = src.Setup
+	}
 	d, s := reflect.ValueOf(dst).Elem(), reflect.ValueOf(src).Elem()
 	for _, section := range userSections {
-		if section == "network" || section == "copy" { // copy is read from the user config alone
+		if section == "network" || section == "copy" || section == "setup" { // copy is read from the user config alone; setup is a list, handled above
 			continue
 		}
 		for i := 0; i < d.NumField(); i++ {

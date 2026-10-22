@@ -195,10 +195,22 @@ func RunArgs(in RunInput) ([]string, error) {
 	}
 	args = append(args, in.ExtraArgs...)
 	args = append(args, "-w", in.Cwd, "--entrypoint", "", in.Image)
-	if len(in.Command) == 0 {
-		return append(args, defaultShell...), nil
+	command := in.Command
+	if len(command) == 0 {
+		command = defaultShell
 	}
-	return append(args, in.Command...), nil
+	return append(args, withSetup(cfg.Setup, command)...), nil
+}
+
+// withSetup runs the setup commands, in order, before the command. A failing
+// one stops the launch. The command is exec'd with its arguments passed as
+// they are, so it keeps the terminal and the signals.
+func withSetup(setup, command []string) []string {
+	if len(setup) == 0 {
+		return command
+	}
+	script := "set -e\n" + strings.Join(setup, "\n") + "\nexec \"$@\""
+	return append([]string{"/bin/sh", "-c", script, "aicatraz-setup"}, command...)
 }
 
 func bind(source, target string, readonly bool) string {

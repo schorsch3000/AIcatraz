@@ -36,6 +36,10 @@ type Config struct {
 
 	Notifications Notifications `yaml:"notifications"`
 
+	// Setup lists shell commands run in the jail, as the jail's user, before
+	// the agent or shell starts. One that fails stops the launch.
+	Setup []string `yaml:"setup"`
+
 	// Copy lists files put into the project directory at launch when they are
 	// not there yet. It only has an effect in the user config.
 	Copy []CopyFile `yaml:"copy"`

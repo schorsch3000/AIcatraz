@@ -185,3 +185,25 @@ func TestUserCopyIntoDirectory(t *testing.T) {
 		t.Fatalf("copy files: %+v", cfg.CopyFiles)
 	}
 }
+
+func TestUserSetupFillsInAndProjectReplaces(t *testing.T) {
+	home, path := userSetup(t, "setup: [a, b]\n", "volumes: [\".:rw\"]\n")
+	cfg, ps, err := Load(path, Options{Home: home})
+	if err != nil || HasErrors(ps) {
+		t.Fatalf("%v %+v", err, ps)
+	}
+	if strings.Join(cfg.Setup, ",") != "a,b" {
+		t.Errorf("user setup not applied: %v", cfg.Setup)
+	}
+	home, path = userSetup(t, "setup: [a, b]\n", "volumes: [\".:rw\"]\nsetup: [c]\n")
+	if cfg, _, _ = Load(path, Options{Home: home}); strings.Join(cfg.Setup, ",") != "c" {
+		t.Errorf("project setup must replace the user's: %v", cfg.Setup)
+	}
+}
+
+func TestSetupRefusesEmptyEntry(t *testing.T) {
+	_, ps := Parse([]byte("volumes: [\"/tmp:rw\"]\nsetup: [\" \"]\n"), Options{Home: "/home/u"})
+	if !HasErrors(ps) {
+		t.Error("an empty setup entry must be an error")
+	}
+}
