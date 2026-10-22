@@ -102,6 +102,9 @@ func (p *project) runArgs(flags ...string) []string {
 
 func (p *project) write(rel, content string) {
 	p.t.Helper()
+	if strings.HasPrefix(rel, "Dockerfile.az") || rel == "aicatraz.yaml" {
+		rel = filepath.Join(".az", rel) // where init puts them
+	}
 	path := filepath.Join(p.dir, rel)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		p.t.Fatal(err)
@@ -647,7 +650,7 @@ func TestUpPrintsTheTmuxCommand(t *testing.T) {
 		t.Fatalf("%v: %s", err, out)
 	}
 	line := string(out)
-	for _, want := range []string{"new-session -s aicatraz-demo", "__with-env", "run -c " + filepath.Join(p.dir, "aicatraz.yaml"), "-- claude"} {
+	for _, want := range []string{"new-session -s aicatraz-demo", "__with-env", "run -c " + filepath.Join(p.dir, ".az", "aicatraz.yaml"), "-- claude"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("missing %q in %s", want, line)
 		}
@@ -667,7 +670,7 @@ func TestUpPrintsTheSessionServerCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	for _, want := range []string{"__mux-serve", "run -c " + filepath.Join(p.dir, "aicatraz.yaml"), "--approval-sock", "approve.sock", "-- claude"} {
+	for _, want := range []string{"__mux-serve", "run -c " + filepath.Join(p.dir, ".az", "aicatraz.yaml"), "--approval-sock", "approve.sock", "-- claude"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("missing %q in %s", want, out)
 		}
@@ -1461,7 +1464,7 @@ func TestUpSession(t *testing.T) {
 	p.write("Makefile", "deploy:\n\t@echo DEPLOYED-ON-HOST\n")
 	p.write("aicatraz.yaml", "project: {id: it-up}\nvolumes:\n  - ~/p:rw\nrules:\n  - command: make\n    args: [deploy]\n    decision: ask\n")
 	down := func() ([]byte, error) {
-		cmd := exec.Command(bin, "down", "-c", filepath.Join(p.dir, "aicatraz.yaml"))
+		cmd := exec.Command(bin, "down", "-c", filepath.Join(p.dir, ".az", "aicatraz.yaml"))
 		cmd.Env = append(os.Environ(), "HOME="+p.home, "XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
 		return cmd.CombinedOutput()
 	}
@@ -1759,7 +1762,7 @@ func TestAgentVerbRunsAsASession(t *testing.T) {
 	p.installFake("claude", "1.0.0", "#!/bin/sh\necho \"FAKE-AGENT-UP\"\nmake deploy; echo \"make-rc=$?\"\nread line; echo \"FAKE-GOT:$line\"\nexit 5\n")
 	p.removeImage("it-agentsession")
 	down := func() {
-		cmd := exec.Command(bin, "down", "-c", filepath.Join(p.dir, "aicatraz.yaml"))
+		cmd := exec.Command(bin, "down", "-c", filepath.Join(p.dir, ".az", "aicatraz.yaml"))
 		cmd.Env = append(os.Environ(), "HOME="+p.home, "XDG_STATE_HOME="+filepath.Join(p.home, ".state"), "XDG_RUNTIME_DIR="+p.runtime)
 		cmd.Run()
 	}
@@ -1992,7 +1995,7 @@ func TestIgnoreFallbackAsksInATerminal(t *testing.T) {
 			if got := read(".dockerignore"); got != tc.wantOld {
 				t.Errorf(".dockerignore = %q, want %q", got, tc.wantOld)
 			}
-			if got := read("Dockerfile.az.dockerignore"); got != tc.wantAz {
+			if got := read(".az/Dockerfile.az.dockerignore"); got != tc.wantAz {
 				t.Errorf("Dockerfile.az.dockerignore = %q, want %q", got, tc.wantAz)
 			}
 		})
@@ -2010,7 +2013,7 @@ func TestIgnoreFallbackWithoutTerminalLeavesFilesAlone(t *testing.T) {
 	if _, stderr, code := p.run("true"); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
-	if _, err := os.Stat(filepath.Join(p.dir, "Dockerfile.az.dockerignore")); err == nil {
+	if _, err := os.Stat(filepath.Join(p.dir, ".az", "Dockerfile.az.dockerignore")); err == nil {
 		t.Error("Dockerfile.az.dockerignore created without a terminal")
 	}
 	if b, _ := os.ReadFile(filepath.Join(p.dir, ".dockerignore")); string(b) != "node_modules\n" {
