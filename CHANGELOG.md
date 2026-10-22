@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 (2026-10-22)
 
 - `aicatraz init dockerfile` is gone: `aicatraz init` always writes a `Dockerfile.az` (the example's own, else one for this machine's distribution, `debian:stable-slim` if that is unknown). `init.dockerfile.lines` in the user config still tunes it.
 - New `copy` section in the user config: files that `aicatraz init` puts into the project directory, unless the target already exists. Never overwrites, and refuses to write through a symlink that leads out of the project.
