@@ -10,7 +10,7 @@ import (
 )
 
 // PortMap publishes a port of the jail on the host: `3000`, `8080:80`,
-// `127.0.0.1:8080:80`, `0.0.0.0:8080:80/tcp`, or ranges of equal length such as
+// `0.0.0.0:8080` (same port inside), `127.0.0.1:8080:80`, `0.0.0.0:8080:80/tcp`, or ranges of equal length such as
 // `8000-8010:8000-8010`.
 type PortMap struct {
 	HostIP    netip.Addr
@@ -55,6 +55,14 @@ func parsePortRange(s string) (lo, hi int, err error) {
 	return lo, hi, nil
 }
 
+func parseHostIP(s string) (netip.Addr, error) {
+	a, err := netip.ParseAddr(s)
+	if err != nil || !a.Is4() {
+		return a, fmt.Errorf("%q is not an IPv4 address (IPv6 is switched off)", s)
+	}
+	return a, nil
+}
+
 // ParsePortMap reads one `ports` entry. Without an address the port is
 // published on 127.0.0.1 only: reachable from this machine, not from others.
 func ParsePortMap(spec string) (PortMap, error) {
@@ -75,16 +83,25 @@ func ParsePortMap(spec string) (PortMap, error) {
 	case 1:
 		host, cont = parts[0], parts[0]
 	case 2:
-		host, cont = parts[0], parts[1]
+		if strings.Contains(parts[0], ".") { // address:port, a port has no dot
+			a, err := parseHostIP(parts[0])
+			if err != nil {
+				return pm, err
+			}
+			pm.HostIP = a
+			host, cont = parts[1], parts[1]
+		} else {
+			host, cont = parts[0], parts[1]
+		}
 	case 3:
-		a, err := netip.ParseAddr(parts[0])
-		if err != nil || !a.Is4() {
-			return pm, fmt.Errorf("%q is not an IPv4 address (IPv6 is switched off)", parts[0])
+		a, err := parseHostIP(parts[0])
+		if err != nil {
+			return pm, err
 		}
 		pm.HostIP = a
 		host, cont = parts[1], parts[2]
 	default:
-		return pm, fmt.Errorf("%q: write it as port, host:container or address:host:container", spec)
+		return pm, fmt.Errorf("%q: write it as port, address:port, host:container or address:host:container", spec)
 	}
 	var err error
 	if pm.HostLo, pm.HostHi, err = parsePortRange(host); err != nil {

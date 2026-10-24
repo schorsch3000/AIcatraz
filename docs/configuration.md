@@ -201,11 +201,12 @@ ports:
   - 3000                  # 127.0.0.1:3000 on this machine -> port 3000 in the jail
   - "8080:80"             # 127.0.0.1:8080 -> port 80
   - "127.0.0.1:9090:90"   # the address written out
+  - "192.168.1.5:8000"    # address:port, same port in the jail
   - "8000-8010:8000-8010" # ranges of the same length
   - "5353:5353/udp"       # udp
 ```
 
-Publishes ports of the jail on this machine, so that a browser (or anything else) here can reach a server that runs inside the jail. An entry is a port, `host:container`, or `address:host:container`, with an optional `/tcp` or `/udp` (tcp by default). **Without an address the port is published on 127.0.0.1 only**: this machine can connect, other machines can't. An address such as `0.0.0.0` publishes it to the network (`config check` warns).
+Publishes ports of the jail on this machine, so that a browser (or anything else) here can reach a server that runs inside the jail. An entry is a port, `address:port`, `host:container`, or `address:host:container`, with an optional `/tcp` or `/udp` (tcp by default). **Without an address the port is published on 127.0.0.1 only**: this machine can connect, other machines can't. An address such as `0.0.0.0` publishes it to the network (`config check` warns).
 
 - It needs a network: with no `network` section, or `network: off`, the jail has none and `ports` is an error. With `network: open` the jail publishes the ports itself; with rules the helper container does, and incoming connections are not subject to the rules (only what the jail connects to is).
 - The server in the jail must listen on all addresses (`0.0.0.0`), not on `127.0.0.1`: a connection from outside arrives at the jail's own address, not at its loopback.

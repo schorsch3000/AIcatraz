@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `ports` accepts `address:port` (`192.168.1.5:8000`): the port is published on that address and is the same inside the jail. A bare port still binds to 127.0.0.1 only.
+
 ## 0.11.0 (2026-10-23)
 
 - New `setup` section (user config or project): shell commands run in the jail, as the jail's user, before the agent or shell starts. A failing one stops the launch.
