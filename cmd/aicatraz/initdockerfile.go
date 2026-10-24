@@ -41,7 +41,31 @@ func generatedDockerfile() (content, image, note string, err error) {
 	if err != nil {
 		return "", "", "", err
 	}
+	if from, ok := startsWithFrom(upgrade); ok { // the user brings their own base image
+		return upgrade, from, "", nil
+	}
 	return "FROM " + image + "\n" + upgrade, image, note, nil
+}
+
+// startsWithFrom reports whether the first instruction of lines (blank lines
+// and comments skipped) is FROM, and returns its image argument.
+func startsWithFrom(lines string) (image string, ok bool) {
+	for _, l := range strings.Split(lines, "\n") {
+		f := strings.Fields(l)
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		if !strings.EqualFold(f[0], "FROM") {
+			return "", false
+		}
+		for _, a := range f[1:] {
+			if !strings.HasPrefix(a, "--") { // skip --platform=...
+				return a, true
+			}
+		}
+		return "", true
+	}
+	return "", false
 }
 
 // major returns the part of a version before the first dot.
@@ -108,7 +132,8 @@ func baseImage(rel map[string]string) (image, note string, ok bool) {
 	return "", "", false
 }
 
-// upgradeLines returns the lines that follow FROM: the user config's
+// upgradeLines returns the lines that follow FROM (or replace it, when they
+// start with their own FROM): the user config's
 // init.dockerfile.lines if it sets them, else the distribution's upgrade line.
 func upgradeLines(rel map[string]string) (string, error) {
 	home, err := os.UserHomeDir()

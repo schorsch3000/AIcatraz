@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `init.dockerfile.lines` that start with their own `FROM` are written as they are: `init` no longer adds the detected `FROM` line before them.
+
 ## 0.13.0 (2026-10-24)
 
 - New flag `--pull` for `run`, `up` and the agent commands: pulls the images again (`docker pull` for `image:`, `docker build --pull` for a Dockerfile, a rebuild of the network helper image) and rebuilds whatever changed.

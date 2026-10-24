@@ -217,6 +217,8 @@ func TestInitDockerfileUserLines(t *testing.T) {
 	for _, c := range []struct{ yaml, want string }{
 		{"init: {dockerfile: {lines: \"RUN apt install -y git\"}}\n", "FROM debian:13\nRUN apt install -y git\n"},
 		{"init: {dockerfile: {lines: \"\"}}\n", "FROM debian:13\n"},
+		{"init: {dockerfile: {lines: \"FROM alpine:3\\nRUN apk add git\"}}\n", "FROM alpine:3\nRUN apk add git\n"},
+		{"init: {dockerfile: {lines: \"# mine\\nfrom --platform=linux/amd64 alpine:3\"}}\n", "# mine\nfrom --platform=linux/amd64 alpine:3\n"},
 	} {
 		dir, _ := inDir(t)
 		home := t.TempDir()

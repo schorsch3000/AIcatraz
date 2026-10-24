@@ -33,7 +33,7 @@ bar: { theme: random, symbol: "⚠️", symbol_width: 2 }
 network: { default: ask }
 ```
 
-`init.dockerfile.lines` replaces the package upgrade line that `aicatraz init` writes after `FROM` (only the user config is read for this). Without it the line for your distribution is written; `""` writes none.
+`init.dockerfile.lines` replaces the package upgrade line that `aicatraz init` writes after `FROM` (only the user config is read for this). Without it the line for your distribution is written; `""` writes none. If `lines` starts with its own `FROM`, nothing is added before it: the Dockerfile.az is exactly `lines`.
 
 ```yaml
 init:
