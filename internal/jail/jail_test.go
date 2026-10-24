@@ -291,6 +291,22 @@ func TestBuildArgs(t *testing.T) {
 	}
 }
 
+func TestBuildArgsPull(t *testing.T) {
+	got := Build{Dockerfile: "/p/Dockerfile.az", Context: "/p", Pull: true}.Args("aicatraz/x:latest")
+	want := []string{"build", "--pull", "-f", "/p/Dockerfile.az", "-t", "aicatraz/x:latest", "/p"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestBuildArgsNoCache(t *testing.T) {
+	got := Build{Dockerfile: "/p/Dockerfile.az", Context: "/p", Pull: true, NoCache: true}.Args("t")
+	want := []string{"build", "--pull", "--no-cache", "-f", "/p/Dockerfile.az", "-t", "t", "/p"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v", got)
+	}
+}
+
 func TestProjectID(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "My Project")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

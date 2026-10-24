@@ -62,13 +62,22 @@ func egressRunArgs(name, id string, pid int, binary, sock, rules string, resolve
 		egress.SidecarCommand, "/aicatraz/control.sock", "/aicatraz/egress.nft", strings.Join(resolvers, ","))
 }
 
-// ensureEgressImage builds the helper image if this machine does not have it.
-func ensureEgressImage(out io.Writer) error {
-	if exec.Command("docker", "image", "inspect", egressImage).Run() == nil {
+// ensureEgressImage builds the helper image if this machine does not have it,
+// or, with pull or noCache, builds it again.
+func ensureEgressImage(out io.Writer, pull, noCache bool) error {
+	if !pull && !noCache && exec.Command("docker", "image", "inspect", egressImage).Run() == nil {
 		return nil
 	}
-	fmt.Fprintln(out, "aicatraz: building the network helper image "+egressImage+" (once; it needs network access)")
-	cmd := exec.Command("docker", "build", "-t", egressImage, "-")
+	fmt.Fprintln(out, "aicatraz: building the network helper image "+egressImage+" (it needs network access)")
+	args := []string{"build"}
+	if pull {
+		args = append(args, "--pull")
+	}
+	if noCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, "-t", egressImage, "-")
+	cmd := exec.Command("docker", args...)
 	cmd.Stdin = strings.NewReader(egressDockerfile)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {
@@ -130,8 +139,8 @@ type egressRun struct {
 
 // startEgress starts the sidecar for a session and waits until its firewall
 // is in place. The jail then joins its network. The returned stop removes it.
-func startEgress(cfg *config.Config, id, state, runDir string, approver approve.Approver, self string, stderr io.Writer) (*egressRun, error) {
-	if err := ensureEgressImage(stderr); err != nil {
+func startEgress(cfg *config.Config, id, state, runDir string, approver approve.Approver, self string, stderr io.Writer, pull, noCache bool) (*egressRun, error) {
+	if err := ensureEgressImage(stderr, pull, noCache); err != nil {
 		return nil, err
 	}
 	removeStaleEgress()

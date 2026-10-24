@@ -91,7 +91,7 @@ func probeSudo(docker, image string) (hasSudo bool, rel map[string]string, err e
 
 // BuildSudoImage builds tag from base: sudo installed if it is missing, and
 // the host user allowed to use it without a password.
-func BuildSudoImage(base, tag string, uid int, out io.Writer) error {
+func BuildSudoImage(base, tag string, uid int, noCache bool, out io.Writer) error {
 	hasSudo, rel, err := probeSudo("docker", base)
 	if err != nil {
 		return err
@@ -108,7 +108,11 @@ func BuildSudoImage(base, tag string, uid int, out io.Writer) error {
 				"install sudo in your Dockerfile.az (aicatraz adds the sudoers entry itself)", name)
 		}
 	}
-	cmd := exec.Command("docker", "build", "-t", tag, "-")
+	args := []string{"build", "-t", tag, "-"}
+	if noCache {
+		args = []string{"build", "--no-cache", "-t", tag, "-"}
+	}
+	cmd := exec.Command("docker", args...)
 	cmd.Stdin = strings.NewReader(SudoDockerfile(base, uid, install))
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {

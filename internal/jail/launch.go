@@ -44,6 +44,8 @@ type Options struct {
 	BarFG        string   // text color of the bar
 	BarBG        string   // background color of the bar
 	ApproveBuild bool     // pin changed build files without asking
+	Pull         bool     // pull the images again, and rebuild what depends on them
+	NoCache      bool     // build the images without the layer cache
 	Agent        string   // start this coding agent ("@config" for the configured one)
 	AgentArgs    []string // arguments for the agent
 	Resume       string   // continue this agent session
@@ -95,6 +97,9 @@ func Launch(o Options) (int, error) {
 		return 0, err
 	}
 
+	if img.Build != nil {
+		img.Build.Pull, img.Build.NoCache = o.Pull, o.NoCache
+	}
 	baseRef := img.Ref // what the build produces, or the image as given
 	if cfg.Sudo {
 		img.Ref = SudoRef(id) // the container runs the image with sudo added
@@ -182,6 +187,9 @@ func Launch(o Options) (int, error) {
 	}
 
 	if o.Print {
+		if o.Pull && img.Build == nil {
+			fmt.Fprintln(o.Stdout, shellLine("docker", []string{"pull", baseRef}))
+		}
 		if img.Build != nil {
 			fmt.Fprintln(o.Stdout, shellLine("docker", img.Build.Args(baseRef)))
 		}
@@ -204,6 +212,13 @@ func Launch(o Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if o.Pull && img.Build == nil {
+		cmd := exec.Command("docker", "pull", baseRef)
+		cmd.Stdout, cmd.Stderr = o.Stderr, o.Stderr
+		if err := cmd.Run(); err != nil {
+			return 0, fmt.Errorf("docker pull %s failed: %w", baseRef, err)
+		}
+	}
 	if img.Build != nil {
 		if err := ApproveBuild(store, *img.Build, o.ApproveBuild, terminalPrompt(os.Stdin, os.Stderr, cfg)); err != nil {
 			return 0, err
@@ -215,7 +230,7 @@ func Launch(o Options) (int, error) {
 		}
 	}
 	if cfg.Sudo {
-		if err := BuildSudoImage(baseRef, img.Ref, uid, o.Stderr); err != nil {
+		if err := BuildSudoImage(baseRef, img.Ref, uid, o.NoCache, o.Stderr); err != nil {
 			return 0, err
 		}
 	}
@@ -258,7 +273,7 @@ func Launch(o Options) (int, error) {
 	}
 	defer stop()
 	if cfg.NetworkMode() == config.NetFiltered {
-		eg, err := startEgress(cfg, id, state, runDir, approver, self, o.Stderr)
+		eg, err := startEgress(cfg, id, state, runDir, approver, self, o.Stderr, o.Pull, o.NoCache)
 		if err != nil {
 			return 0, err
 		}

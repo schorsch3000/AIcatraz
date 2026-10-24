@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- New flag `--pull` for `run`, `up` and the agent commands: pulls the images again (`docker pull` for `image:`, `docker build --pull` for a Dockerfile, a rebuild of the network helper image) and rebuilds whatever changed.
+- New flag `--no-cache`: builds the project image, the sudo layer and the network helper image without the layer cache.
+
 ## 0.12.0 (2026-10-24)
 
 - `ports` accepts `address:port` (`192.168.1.5:8000`): the port is published on that address and is the same inside the jail. A bare port still binds to 127.0.0.1 only.

@@ -35,6 +35,8 @@ var (
 	flagConfig    = cflag{"c", "config", "file", "config file to use"}
 	flagPrint     = cflag{"", "print", "", "show the docker commands, change nothing"}
 	flagBuild     = cflag{"", "approve-build", "", "approve changed build files without asking"}
+	flagPull      = cflag{"", "pull", "", "pull the images again and rebuild what depends on them"}
+	flagNoCache   = cflag{"", "no-cache", "", "build the images without the layer cache"}
 	flagTTY       = cflag{"", "approval-tty", "file", "terminal that answers approval prompts"}
 	flagAgent     = cflag{"", "agent", "tool", "start this agent"}
 	flagResume    = cflag{"", "resume", "value", "continue this agent session"}
@@ -56,13 +58,13 @@ var (
 
 // agentFlags are the flags of the verbs that start an agent: they run as a
 // session, so they take the session's flags.
-var agentFlags = []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagNoSession, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG}
+var agentFlags = []cflag{flagConfig, flagPrint, flagTTY, flagBuild, flagPull, flagNoCache, flagNoSession, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG}
 
 var completionVerbs = []cverb{
-	{name: "up", args: "[flags] [-- command...]", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagAgent, flagResume}},
+	{name: "up", args: "[flags] [-- command...]", desc: "start the jail as a session you can detach from", flags: []cflag{flagConfig, flagPrint, flagTmux, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG, flagTTY, flagBuild, flagPull, flagNoCache, flagAgent, flagResume}},
 	{name: "bar-colors", args: "", desc: "show the status bar in every color theme"},
 	{name: "down", args: "[flags]", desc: "stop the session of this project", flags: []cflag{flagConfig}},
-	{name: "run", args: "[flags] [-- command...]", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagSock, flagBuild, flagAgent, flagResume, flagNoSession, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG}},
+	{name: "run", args: "[flags] [-- command...]", desc: "start the jail in this terminal", flags: []cflag{flagConfig, flagPrint, flagTTY, flagSock, flagBuild, flagPull, flagNoCache, flagAgent, flagResume, flagNoSession, flagDetach, flagInfo, flagBar, flagTheme, flagBarFG, flagBarBG}},
 	{name: "shell", args: "[flags] [-- command...]", desc: "open another shell in the running jail", flags: []cflag{flagConfig, flagPrint}},
 	{name: "claude", args: "[flags] [-- agent arguments...]", desc: "start Claude Code in the jail", flags: agentFlags},
 	{name: "opencode", args: "[flags] [-- agent arguments...]", desc: "start opencode in the jail", flags: agentFlags},

@@ -85,6 +85,12 @@ func muxRunArgs(cfgPath, dir string, o Options) []string {
 	if o.ApproveBuild {
 		run = append(run, "--approve-build")
 	}
+	if o.Pull {
+		run = append(run, "--pull")
+	}
+	if o.NoCache {
+		run = append(run, "--no-cache")
+	}
 	if o.Agent != "" {
 		run = append(run, "--agent", o.Agent)
 	}

@@ -32,7 +32,7 @@ The README has the short version. This is the full list.
 | `aicatraz help [command]` | The usage, or the flags of one command. `aicatraz <command> --help` does the same. |
 | `aicatraz version` | Print the version. |
 
-Flags for `run`, `up` and the agent commands: `-c file` (config, default `.az/aicatraz.yaml`, or an `aicatraz.yaml` in the current directory from before `.az`), `--print` (show the `docker` commands and change nothing), `--approval-tty /dev/pts/N`, `--approve-build` (pin a changed `Dockerfile.az` without asking). `aicatraz help <command>` lists the flags of each command.
+Flags for `run`, `up` and the agent commands: `-c file` (config, default `.az/aicatraz.yaml`, or an `aicatraz.yaml` in the current directory from before `.az`), `--print` (show the `docker` commands and change nothing), `--approval-tty /dev/pts/N`, `--approve-build` (pin a changed `Dockerfile.az` without asking), `--pull` (pull the images again: `docker pull` for `image:`, `docker build --pull` for a Dockerfile, which rebuilds whatever the new base changes; the network helper image is rebuilt too), `--no-cache` (build the images without the layer cache; combine with `--pull` for a full refresh). `aicatraz help <command>` lists the flags of each command.
 
 **One way to write flags, everywhere.** Every command that reads a project's config takes `-c file` (or `--config file`), also `config check -c file`, and anywhere on the line. Long flags also take `--flag=value`. A flag a command does not have is an error that names the flag and the command; nothing is guessed. After `--` everything belongs to the program in the jail.
 

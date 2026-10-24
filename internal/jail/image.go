@@ -19,11 +19,20 @@ const (
 type Build struct {
 	Dockerfile string
 	Context    string
+	Pull       bool // refresh the base images first (`docker build --pull`)
+	NoCache    bool // rebuild every layer (`docker build --no-cache`)
 }
 
 // Args returns the arguments for `docker build`.
 func (b Build) Args(tag string) []string {
-	return []string{"build", "-f", b.Dockerfile, "-t", tag, b.Context}
+	args := []string{"build"}
+	if b.Pull {
+		args = append(args, "--pull")
+	}
+	if b.NoCache {
+		args = append(args, "--no-cache")
+	}
+	return append(args, "-f", b.Dockerfile, "-t", tag, b.Context)
 }
 
 // Image is the image a container starts from, and how to get it.

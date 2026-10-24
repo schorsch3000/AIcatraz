@@ -308,6 +308,12 @@ func launch(verb string, args []string, stdout, stderr io.Writer) int {
 		case a == "--approve-build" && verb != "shell" && verb != "down":
 			opts.ApproveBuild = true
 			args = args[1:]
+		case a == "--no-cache" && verb != "shell" && verb != "down":
+			opts.NoCache = true
+			args = args[1:]
+		case a == "--pull" && verb != "shell" && verb != "down":
+			opts.Pull = true
+			args = args[1:]
 		case a == "--approval-tty" && len(args) >= 2 && verb != "shell":
 			opts.ApprovalTTY = args[1]
 			args = args[2:]
