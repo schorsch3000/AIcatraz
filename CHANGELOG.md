@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 (2026-10-24)
 
 - `init.dockerfile.lines` that start with their own `FROM` are written as they are: `init` no longer adds the detected `FROM` line before them.
 
