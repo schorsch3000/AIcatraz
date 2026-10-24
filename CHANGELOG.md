@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 (2026-10-24)
 
 - New flag `--pull` for `run`, `up` and the agent commands: pulls the images again (`docker pull` for `image:`, `docker build --pull` for a Dockerfile, a rebuild of the network helper image) and rebuilds whatever changed.
 - New flag `--no-cache`: builds the project image, the sudo layer and the network helper image without the layer cache.
