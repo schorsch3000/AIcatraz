@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 (2026-10-24)
 
 - `ports` accepts `address:port` (`192.168.1.5:8000`): the port is published on that address and is the same inside the jail. A bare port still binds to 127.0.0.1 only.
 
