@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- In `aicatraz up`, opening a waiting prompt with the info key and answering prompts no longer count as typing: a prompt opened with `Ctrl-Q` takes keys at once, and a prompt queued behind the one you just answered opens at once, without the guard, instead of waiting for `approval.idle`.
+
 ## 0.14.0 (2026-10-24)
 
 - `init.dockerfile.lines` that start with their own `FROM` are written as they are: `init` no longer adds the detected `FROM` line before them.

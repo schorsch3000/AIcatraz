@@ -580,6 +580,49 @@ func TestInfoKeyOpensAWaitingPrompt(t *testing.T) {
 	s.stop()
 }
 
+// Opening a waiting prompt with the info key and answering it is not typing:
+// neither prompt ignores keys, and the one queued behind opens at once.
+func TestInfoKeyAndAnswersDoNotHoldBackTheNextPrompt(t *testing.T) {
+	s := startSession(t, `while read l; do echo "typed:$l"; done`)
+	tm := attachWith(t, s, AttachOptions{Detach: DefaultKey, Info: InfoKey, Bar: BarBottom, Project: "proj", Idle: time.Minute})
+	tm.type_("a\r")
+	tm.expect("typed:a")
+	ap := &Approver{Sock: filepath.Join(s.dir, ApproveSock)}
+	got := make(chan approve.Answer, 2)
+	for _, name := range []string{"first", "second"} {
+		go func() {
+			a, _ := ap.Ask(context.Background(), approve.Request{Name: name}, 30*time.Second)
+			got <- a
+		}()
+		time.Sleep(100 * time.Millisecond) // first is asked first
+	}
+	tm.expect("Command first")
+	tm.type_(string([]byte{InfoKey.Byte()}))
+	tm.expect("ON THE HOST")
+	time.Sleep(100 * time.Millisecond) // well inside the guard
+	tm.type_("n")
+	select {
+	case a := <-got:
+		if a != approve.Deny {
+			t.Errorf("answer %v", a)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a prompt opened with the info key ignored the answer")
+	}
+	tm.expect("second") // opens by itself, although the program was typed to a moment ago
+	time.Sleep(100 * time.Millisecond)
+	tm.type_("n")
+	select {
+	case a := <-got:
+		if a != approve.Deny {
+			t.Errorf("answer %v", a)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the queued prompt ignored the answer")
+	}
+	s.stop()
+}
+
 // The timeout counts from when the prompt is on screen, not from when it was asked.
 func TestPromptTimeoutStartsWhenItOpens(t *testing.T) {
 	s := startSession(t, `while read l; do echo "typed:$l"; done`)

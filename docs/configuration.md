@@ -274,7 +274,7 @@ The jail always drops all capabilities, sets `no-new-privileges`, and has a read
 |---|---|---|
 | `timeout` | `2m` | How long a prompt waits before it counts as a deny, counted from when it is on your screen. 5 seconds to 1 hour. |
 | `idle` | `5s` | In `aicatraz up`: how long you must have stopped typing before a prompt takes over the screen. A prompt that comes while you type waits, and the status bar blinks a message such as `⚠️ Network github.com:443  Ctrl-Q`; it opens when you have been idle that long, or at once when you press the info key (`Ctrl-Q`). `0` opens every prompt at once. Up to 10 minutes. |
-| `guard` | `500ms` | How long a prompt that has just opened ignores keys. 100 milliseconds to 5 seconds. |
+| `guard` | `500ms` | How long a prompt that has just opened by itself ignores keys. A prompt opened with the info key, or one that follows a prompt you just answered, takes keys at once. 100 milliseconds to 5 seconds. |
 
 A prompt that waits for you to stop typing is denied after 10 minutes at most, plus its `timeout`. The tmux popup and `--approval-tty` don't wait: they show the prompt at once.
 

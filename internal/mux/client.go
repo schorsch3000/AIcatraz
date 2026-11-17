@@ -27,6 +27,11 @@ import (
 // answer it.
 const DefaultGuard = 500 * time.Millisecond
 
+// answerGrace is how long after the person last pressed a key in a prompt a
+// new one still counts them as at the prompts, not at the program: a prompt
+// queued behind the one they just answered opens without the guard.
+const answerGrace = 5 * time.Second
+
 // DefaultIdle is how long the person must have stopped typing before a prompt
 // takes over the screen.
 const DefaultIdle = 5 * time.Second
@@ -168,9 +173,10 @@ type client struct {
 	idleFor time.Duration // how long the person must not have typed before a prompt opens
 	guard   time.Duration // how long a prompt that opened ignores keys
 
-	lastKey   time.Time // when the person last typed to the program
-	pending   *pending  // a prompt the person has not seen yet
-	lastPhase bool      // the look of the alert as last drawn
+	lastKey    time.Time // when the person last typed to the program
+	lastDialog time.Time // when the person last opened or answered a prompt
+	pending    *pending  // a prompt the person has not seen yet
+	lastPhase  bool      // the look of the alert as last drawn
 }
 
 // pending is a prompt held back because the person is typing.
@@ -267,15 +273,13 @@ func (c *client) run(winch <-chan os.Signal) (Result, error) {
 				c.feedOverlay(k)
 				continue
 			}
-			if !isFocusReport(k) {
-				c.lastKey = time.Now()
-			}
 			if c.pending != nil && c.info.Name != "" {
 				if i := c.info.find(k); i >= 0 { // the key that shows the settings shows the waiting prompt
 					if i > 0 {
 						c.sendInput(k[:i])
 					}
-					c.openPending()
+					c.lastDialog = time.Now()
+					c.openPending(false) // asked for: the key that opened it is not typing
 					continue
 				}
 			}
@@ -383,11 +387,11 @@ func (c *client) onPrompt(payload []byte) {
 	}
 	var req approve.Request
 	if json.Unmarshal(payload[8:], &req) != nil {
-		c.startOverlay(payload) // it answers the malformed request itself
+		c.startOverlay(payload, true) // it answers the malformed request itself
 		return
 	}
-	if c.overlay == nil && time.Since(c.lastKey) >= c.idleFor {
-		c.startOverlay(payload)
+	if c.overlay == nil && (time.Since(c.lastKey) >= c.idleFor || c.atPrompts()) {
+		c.startOverlay(payload, !c.atPrompts())
 		return
 	}
 	c.setPending(&pending{id: binary.BigEndian.Uint32(payload[0:4]), payload: payload, alert: c.alertText(req)})
@@ -426,22 +430,33 @@ func (c *client) setPending(p *pending) {
 	c.drawBar(true)
 }
 
-// openPending shows the waiting prompt now.
-func (c *client) openPending() {
+// atPrompts reports whether the person's last keys, a moment ago, opened or
+// answered a prompt rather than went to the program. A prompt queued behind
+// then opens at once and takes keys at once: they are answering prompts, not
+// typing.
+func (c *client) atPrompts() bool {
+	return c.lastDialog.After(c.lastKey) && time.Since(c.lastDialog) < answerGrace
+}
+
+// openPending shows the waiting prompt now; guarded, it ignores keys at first.
+func (c *client) openPending(guarded bool) {
 	p := c.pending
 	if p == nil {
 		return
 	}
 	c.pending = nil
 	c.bar.Alert = ""
-	c.startOverlay(p.payload)
+	c.startOverlay(p.payload, guarded)
 }
 
 // startOverlay draws a prompt over everything and starts reading its answer.
 // The terminal first goes back to its normal modes (no mouse reports, no
 // extended keys that would arrive as escape sequences and count as Esc), then
 // onto the alternate screen, which the program's own screen survives.
-func (c *client) startOverlay(payload []byte) {
+//
+// Guarded, it ignores keys for the guard, as the person may have been typing
+// to the program when it appeared.
+func (c *client) startOverlay(payload []byte, guarded bool) {
 	if len(payload) < 8 {
 		return
 	}
@@ -458,7 +473,11 @@ func (c *client) startOverlay(payload []byte) {
 	// Whatever was typed before the prompt appeared must not answer it.
 	_ = unix.IoctlSetInt(int(c.in.Fd()), unix.TCFLSH, unix.TCIFLUSH)
 	ctx, cancel := context.WithCancel(context.Background())
-	o := &overlay{id: id, cancel: cancel, keys: make(chan byte, 64), armed: time.Now().Add(c.guardOrDefault()), done: make(chan answerMsg, 1)}
+	armed := time.Now()
+	if guarded {
+		armed = armed.Add(c.guardOrDefault())
+	}
+	o := &overlay{id: id, cancel: cancel, keys: make(chan byte, 64), armed: armed, done: make(chan answerMsg, 1)}
 	c.overlay = o
 	c.send(fOpened, binary.BigEndian.AppendUint32(nil, id)) // its timeout starts now
 
@@ -562,6 +581,9 @@ func (c *client) feedOverlay(k []byte) {
 	if time.Now().Before(c.overlay.armed) {
 		return
 	}
+	if c.overlay.id != 0 { // a prompt, not the settings popup
+		c.lastDialog = time.Now()
+	}
 	for _, b := range k {
 		select {
 		case c.overlay.keys <- b:
@@ -614,8 +636,12 @@ func (c *client) write(p []byte) {
 	c.drawBar(false)
 }
 
-// sendInput passes typed bytes on to the program.
+// sendInput passes typed bytes on to the program. Only these count as typing:
+// keys that open or answer a prompt do not hold the next one back.
 func (c *client) sendInput(k []byte) {
+	if !isFocusReport(k) {
+		c.lastKey = time.Now()
+	}
 	c.send(fInput, k)
 }
 
@@ -639,8 +665,8 @@ func (c *client) idle() {
 	now := time.Now()
 	if c.pending != nil && c.overlay == nil {
 		switch {
-		case now.Sub(c.lastKey) >= c.idleFor:
-			c.openPending()
+		case now.Sub(c.lastKey) >= c.idleFor || c.atPrompts():
+			c.openPending(!c.atPrompts())
 			return
 		case c.scr.Active() && c.bar.Colors.Rainbow:
 			c.drawBar(true) // the rainbow turns
