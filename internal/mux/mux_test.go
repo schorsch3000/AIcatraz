@@ -126,6 +126,10 @@ func attachWith(t *testing.T, s *session, o AttachOptions) *terminal {
 		tm.res <- r
 	}()
 	t.Cleanup(func() { master.Close(); slave.Close() })
+	// The client writes this once the terminal is raw. Keys typed before then
+	// would go through the line discipline (Enter arrives as "\n", and is
+	// echoed), and a test would see whichever side won the race.
+	tm.expect("\n\x1b[A")
 	return tm
 }
 
@@ -419,7 +423,7 @@ func TestTermLogRecordsBothDirections(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := string(data)
-	if !strings.Contains(log, ` < "secret\n"`) || !strings.Contains(log, " > ") || !strings.Contains(log, `got:secret`) || !strings.Contains(log, `\x1b[?25h`) {
+	if !strings.Contains(log, ` < "secret\r"`) || !strings.Contains(log, " > ") || !strings.Contains(log, `got:secret`) || !strings.Contains(log, `\x1b[?25h`) {
 		t.Errorf("the log lacks input or output:\n%s", log)
 	}
 	if st, _ := os.Stat(logPath); st.Mode().Perm() != 0o600 {
