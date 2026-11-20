@@ -3,7 +3,10 @@
 ## Unreleased
 
 - In `aicatraz up`, opening a waiting prompt with the info key and answering prompts no longer count as typing: a prompt opened with `Ctrl-Q` takes keys at once, and a prompt queued behind the one you just answered opens at once, without the guard, instead of waiting for `approval.idle`.
-- Claude Code keeps its temporary files, its scratchpad among them, in `.az/claude/` in the project (`CLAUDE_CODE_TMPDIR`) instead of the jail's `/tmp`, which is removed with every session. The directory is created private (`0700`) with a `.gitignore` of its own, and only when the jail can write there. `init` excludes it from the image build in the new `Dockerfile.az.dockerignore`, and so does the one created from a `.dockerignore`. For an existing `Dockerfile.az.dockerignore` without the line, `aicatraz claude` asks once in a terminal whether to add it; a no is remembered for the project.
+- The agents keep their own files in the project, in `.az/claude/` and `.az/opencode/`, when the jail can write there. Each is created private (`0700`) with a `.gitignore` of its own; a symlink on the way is refused.
+  - Plugins live in `.az/<agent>/plugins`: copied from your home once, then the agent's own, so plugins installed in the jail stay. Claude Code's `enabledPlugins` and `extraKnownMarketplaces` in the jail's `settings.json` are kept over the host's.
+  - Claude Code's temporary files, its scratchpad among them, go to `.az/claude/` (`CLAUDE_CODE_TMPDIR`) instead of the jail's `/tmp`, which is removed with every session.
+  - `init` excludes both directories from the image build in the new `Dockerfile.az.dockerignore`, and so does the one created from a `.dockerignore`. For an existing `Dockerfile.az.dockerignore` without the agent's line, `aicatraz claude` and `opencode` ask once in a terminal whether to add it; a no is remembered for the project.
 
 ## 0.14.0 (2026-10-24)
 

@@ -33,7 +33,8 @@ type agentRun struct {
 	state     string // the project's state directory
 	home      string
 	roots     map[string]string // root path -> its directory on the host
-	tempDir   string            // the agent's temporary directory in the project, if any
+	project   string            // the project directory
+	agentDir  string            // the agent's own files in the project (.az/<agent>), if the jail can write there
 }
 
 // agentName is the agent a run starts, "" for none.
@@ -96,11 +97,14 @@ func planAgent(o Options, cfg *config.Config, projectDir, home, state string, ui
 		a.sessionID = agent.NewSessionID()
 		lo.SessionID = a.sessionID
 	}
-	if prof.Name == "claude" {
-		// The jail's /tmp is removed with the session, and Claude's scratchpad
-		// with it. In the project it survives, if the jail can write there.
-		if dir := claudeTempDir(projectDir); writableIn(cfg.Resolved, dir) {
-			lo.TempDir, a.tempDir = dir, dir
+	// The agent's own files live in the project, if the jail can write there:
+	// its plugins, and Claude's temporary files (the jail's /tmp, and Claude's
+	// scratchpad with it, is removed with the session).
+	a.project = projectDir
+	if dir := agentDir(projectDir, prof.Name); writableIn(cfg.Resolved, dir) {
+		a.agentDir = dir
+		if prof.Name == "claude" {
+			lo.TempDir = dir
 		}
 	}
 	argv, env := prof.Command(home, lo)
@@ -111,6 +115,14 @@ func planAgent(o Options, cfg *config.Config, projectDir, home, state string, ui
 		host := filepath.Join(state, "agents", prof.Name, strings.NewReplacer("/", "_", ".", "").Replace(r.Path))
 		a.roots[r.Path] = host
 		a.extraArgs = append(a.extraArgs, "--mount", bind(host, filepath.Join(home, r.Path), false))
+	}
+	if a.agentDir != "" {
+		// Mounted over their place in the root, so the agent finds them where it
+		// expects them.
+		for _, pe := range prof.ProjectEntries() {
+			a.extraArgs = append(a.extraArgs, "--mount",
+				bind(filepath.Join(a.agentDir, pe.Entry.Name), filepath.Join(home, pe.Root.Path, pe.Entry.Name), false))
+		}
 	}
 	for _, p := range prof.ParentDirs() {
 		// Parents of the mounted roots (~/.config, ~/.local/share, ...) are
@@ -124,11 +136,13 @@ func planAgent(o Options, cfg *config.Config, projectDir, home, state string, ui
 	return a, nil
 }
 
-// makeTempDir creates an agent's temporary directory in the project, private
-// to the user (Claude Code insists on 0700), with a .gitignore that keeps it
-// out of git. The agent can write to the project, so a symlink in its place is
-// refused rather than followed.
-func makeTempDir(dir string) error {
+// makeAgentDir creates an agent's own directory in the project, private to
+// the user (Claude Code insists on 0700 for its temporary files), with a
+// .gitignore that keeps it out of git.
+func makeAgentDir(project, dir string) error {
+	if err := noSymlinks(project, dir); err != nil {
+		return err
+	}
 	fi, err := os.Lstat(dir)
 	switch {
 	case os.IsNotExist(err):
@@ -147,6 +161,35 @@ func makeTempDir(dir string) error {
 	ignore := filepath.Join(dir, ".gitignore")
 	if _, err := os.Lstat(ignore); os.IsNotExist(err) {
 		return os.WriteFile(ignore, []byte("*\n"), 0o600)
+	}
+	return nil
+}
+
+// noSymlinks refuses a path below project that passes through a symlink. The
+// agent can write to the project, and the launcher, which runs outside the
+// jail, must neither chmod nor mount what such a link points to. Parts that
+// don't exist yet are fine.
+func noSymlinks(project, p string) error {
+	rel, err := filepath.Rel(project, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s is not inside %s", p, project)
+	}
+	cur := project
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "." {
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink", cur)
+		}
 	}
 	return nil
 }
@@ -176,14 +219,27 @@ func (a *agentRun) prepare(image, cwd string) error {
 	if !imageHasFile("docker", image, "/lib64/ld-linux-x86-64.so.2") && !imageHasFile("docker", image, "/lib/ld-linux-aarch64.so.1") {
 		return fmt.Errorf("the image %s has no glibc dynamic loader, so %s can't run in it (is it Alpine or musl-based?); use a Debian- or Ubuntu-based image", image, a.profile.Name)
 	}
-	for _, r := range a.profile.Roots {
-		if err := agent.SyncRoot(a.home, r, a.roots[r.Path]); err != nil {
-			return fmt.Errorf("copying your %s configuration (%s): %w", a.profile.Name, r.Path, err)
+	if a.agentDir != "" {
+		if err := makeAgentDir(a.project, a.agentDir); err != nil {
+			return fmt.Errorf("creating %s for %s's own files: %w", a.agentDir, a.profile.Name, err)
+		}
+		for _, pe := range a.profile.ProjectEntries() {
+			dst := filepath.Join(a.agentDir, pe.Entry.Name)
+			if err := agent.SeedProjectEntry(a.home, pe.Root, pe.Entry, dst); err != nil {
+				return fmt.Errorf("copying your %s %s into %s: %w", a.profile.Name, pe.Entry.Name, dst, err)
+			}
+			// It is mounted into the jail, so it must be a real directory in the project.
+			if err := noSymlinks(a.project, dst); err != nil {
+				return fmt.Errorf("can't mount %s: %w", dst, err)
+			}
+			if fi, err := os.Lstat(dst); err != nil || !fi.IsDir() {
+				return fmt.Errorf("can't mount %s: not a directory", dst)
+			}
 		}
 	}
-	if a.tempDir != "" {
-		if err := makeTempDir(a.tempDir); err != nil {
-			return fmt.Errorf("creating %s for %s's temporary files: %w", a.tempDir, a.profile.Name, err)
+	for _, r := range a.profile.Roots {
+		if err := agent.SyncRoot(a.home, r, a.roots[r.Path], a.agentDir != ""); err != nil {
+			return fmt.Errorf("copying your %s configuration (%s): %w", a.profile.Name, r.Path, err)
 		}
 	}
 	if a.profile.Name == "claude" {

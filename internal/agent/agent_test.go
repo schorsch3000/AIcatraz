@@ -116,7 +116,7 @@ func TestSyncCopiesAndMirrors(t *testing.T) {
 	// State the agent owns, which must survive.
 	put(t, filepath.Join(dest, "projects", "p", "s.jsonl"), "transcript")
 
-	if err := SyncRoot(home, root, dest); err != nil {
+	if err := SyncRoot(home, root, dest, false); err != nil {
 		t.Fatal(err)
 	}
 	if read(t, filepath.Join(dest, "settings.json")) != `{"a":1}` ||
@@ -140,7 +140,7 @@ func TestSyncCopiesAndMirrors(t *testing.T) {
 	os.Remove(filepath.Join(home, ".claude", "skills", "a", "SKILL.md"))
 	put(t, filepath.Join(home, ".claude", "skills", "b.md"), "new skill")
 
-	if err := SyncRoot(home, root, dest); err != nil {
+	if err := SyncRoot(home, root, dest, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, filepath.Join(dest, "settings.json")); got != `{"a":2}` {
@@ -158,7 +158,7 @@ func TestSyncCopiesAndMirrors(t *testing.T) {
 
 	// Removed on the host: removed in the jail.
 	os.Remove(filepath.Join(home, ".claude.json"))
-	if err := SyncRoot(home, root, dest); err != nil {
+	if err := SyncRoot(home, root, dest, false); err != nil {
 		t.Fatal(err)
 	}
 	if exists(filepath.Join(dest, ".claude.json")) {
@@ -173,7 +173,7 @@ func TestSyncKeepsPrivateModesAndSkipsUnchangedFiles(t *testing.T) {
 	put(t, creds, "secret")
 	os.Chmod(creds, 0o600)
 	root := Root{Path: ".claude", Entries: []Entry{{Name: ".credentials.json"}}}
-	if err := SyncRoot(home, root, dest); err != nil {
+	if err := SyncRoot(home, root, dest, false); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := os.Stat(filepath.Join(dest, ".credentials.json"))
@@ -187,7 +187,7 @@ func TestSyncKeepsPrivateModesAndSkipsUnchangedFiles(t *testing.T) {
 	// An unchanged file isn't rewritten: its inode stays.
 	before, _ := os.Stat(filepath.Join(dest, ".credentials.json"))
 	time.Sleep(10 * time.Millisecond)
-	SyncRoot(home, root, dest)
+	SyncRoot(home, root, dest, false)
 	after, _ := os.Stat(filepath.Join(dest, ".credentials.json"))
 	if !os.SameFile(before, after) {
 		t.Error("an unchanged file must not be copied again")
@@ -204,7 +204,7 @@ func TestSyncFollowsSymlinksAndSurvivesCycles(t *testing.T) {
 	os.Symlink(filepath.Join(home, ".claude", "skills"), filepath.Join(home, ".claude", "skills", "loop")) // cycle
 	os.Symlink("/nonexistent/target", filepath.Join(home, ".claude", "skills", "dangling"))
 	root := Root{Path: ".claude", Entries: []Entry{{Name: "skills"}}}
-	if err := SyncRoot(home, root, dest); err != nil {
+	if err := SyncRoot(home, root, dest, false); err != nil {
 		t.Fatal(err)
 	}
 	if read(t, filepath.Join(dest, "skills", "linked", "SKILL.md")) != "from a link" {
@@ -229,7 +229,7 @@ func TestSyncSizeLimit(t *testing.T) {
 	f, _ := os.Create(big)
 	f.Truncate(maxSyncBytes + 1) // sparse
 	f.Close()
-	err := SyncRoot(home, Root{Path: ".config/opencode", Entries: []Entry{{Name: "plugins"}}}, t.TempDir())
+	err := SyncRoot(home, Root{Path: ".config/opencode", Entries: []Entry{{Name: "plugins"}}}, t.TempDir(), false)
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Errorf("got %v", err)
 	}
@@ -430,5 +430,99 @@ func TestTrustClaudeDir(t *testing.T) {
 	p := doc["projects"].(map[string]any)["/w"].(map[string]any)
 	if p["hasTrustDialogAccepted"] != true || p["x"] != float64(1) || doc["theme"] != "dark" {
 		t.Fatalf("got %s", data)
+	}
+}
+
+func TestProjectEntries(t *testing.T) {
+	for name, want := range map[string]string{"claude": ".claude/plugins", "opencode": ".config/opencode/plugins"} {
+		p, _ := Lookup(name)
+		pe := p.ProjectEntries()
+		if len(pe) != 1 || pe[0].Root.Path+"/"+pe[0].Entry.Name != want {
+			t.Errorf("%s: %+v", name, pe)
+		}
+	}
+}
+
+func TestSeedProjectEntry(t *testing.T) {
+	home := t.TempDir()
+	root := Root{Path: ".claude"}
+	e := Entry{Name: "plugins", Project: true}
+	dst := filepath.Join(t.TempDir(), "plugins")
+
+	// Copied from the host the first time...
+	put(t, filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), "host")
+	if err := SeedProjectEntry(home, root, e, dst); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(dst, "installed_plugins.json")) != "host" {
+		t.Fatal("not seeded")
+	}
+	// ...and the agent's own after that: neither host changes nor removals reach it.
+	put(t, filepath.Join(dst, "installed_plugins.json"), "jail")
+	put(t, filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), "host2")
+	if err := SeedProjectEntry(home, root, e, dst); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(dst, "installed_plugins.json")) != "jail" {
+		t.Error("a seeded entry is never overwritten")
+	}
+
+	// Nothing on the host: an empty directory.
+	empty := filepath.Join(t.TempDir(), "plugins")
+	if err := SeedProjectEntry(t.TempDir(), root, e, empty); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(empty); err != nil || !st.IsDir() {
+		t.Errorf("want an empty directory: %v", err)
+	}
+}
+
+func TestSyncInProject(t *testing.T) {
+	home := t.TempDir()
+	dest := t.TempDir()
+	root := Root{Path: ".claude", Entries: []Entry{
+		{Name: "settings.json", Keep: []string{"enabledPlugins"}},
+		{Name: "plugins", Project: true},
+	}}
+	put(t, filepath.Join(home, ".claude", "settings.json"), `{"theme":"dark","enabledPlugins":{"a@m":true,"b@m":true}}`)
+	put(t, filepath.Join(home, ".claude", "plugins", "x"), "host")
+
+	if err := SyncRoot(home, root, dest, true); err != nil {
+		t.Fatal(err)
+	}
+	if exists(filepath.Join(dest, "plugins", "x")) {
+		t.Error("a project entry is not synced, only its mount point made")
+	}
+	if st, err := os.Stat(filepath.Join(dest, "plugins")); err != nil || !st.IsDir() {
+		t.Error("mount point missing")
+	}
+
+	// The agent enables and disables plugins; you change another setting.
+	put(t, filepath.Join(dest, "settings.json"), `{"theme":"something else","enabledPlugins":{"b@m":false,"c@m":true}}`)
+	put(t, filepath.Join(home, ".claude", "settings.json"), `{"theme":"light","enabledPlugins":{"a@m":true,"b@m":true}}`)
+	if err := SyncRoot(home, root, dest, true); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Theme          string          `json:"theme"`
+		EnabledPlugins map[string]bool `json:"enabledPlugins"`
+	}
+	if err := json.Unmarshal([]byte(read(t, filepath.Join(dest, "settings.json"))), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Theme != "light" {
+		t.Errorf("other settings come from the host: %q", got.Theme)
+	}
+	if !got.EnabledPlugins["a@m"] || got.EnabledPlugins["b@m"] || !got.EnabledPlugins["c@m"] {
+		t.Errorf("the jail's plugin settings win, merged with the host's: %v", got.EnabledPlugins)
+	}
+
+	// Without the project, it's a plain sync again.
+	put(t, filepath.Join(dest, "settings.json"), `{"enabledPlugins":{"c@m":true}}`)
+	if err := SyncRoot(home, root, dest, false); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(dest, "settings.json")) != `{"theme":"light","enabledPlugins":{"a@m":true,"b@m":true}}` {
+		t.Error("keys are kept only while the plugins live in the project")
 	}
 }

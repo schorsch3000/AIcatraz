@@ -79,16 +79,14 @@ func (p ignorePattern) matches(rel string) bool {
 	return false
 }
 
-// StarterIgnore is what a new ignore file gets: Claude Code's temporary files
-// (its scratchpad), which the launcher keeps in the project.
-const StarterIgnore = "# Claude Code's temporary files and scratchpad\n" + claudeTempRel + "\n"
+// StarterIgnore is what a new ignore file gets: the agents' own files, which
+// the launcher keeps in the project (plugins, Claude Code's scratchpad).
+const StarterIgnore = "# The agents' own files: plugins, Claude Code's scratchpad\n" +
+	config.AzDir + "/claude\n" + config.AzDir + "/opencode\n"
 
-// claudeTempRel is Claude Code's temporary directory, relative to the project.
-const claudeTempRel = config.AzDir + "/claude"
-
-// claudeTempDir is Claude Code's temporary directory in a project.
-func claudeTempDir(projectDir string) string {
-	return filepath.Join(projectDir, filepath.FromSlash(claudeTempRel))
+// agentDir is where an agent keeps its own files in a project: .az/<agent>.
+func agentDir(projectDir, agent string) string {
+	return filepath.Join(projectDir, config.AzDir, agent)
 }
 
 // IgnorePath is the ignore file of a build: <dockerfile>.dockerignore, which
@@ -277,10 +275,10 @@ func declineIgnore(state, file, rel string) error {
 	return AppendIgnore(filepath.Join(state, declinedIgnore), file+"\t"+rel)
 }
 
-// OfferTempIgnore asks, once per project, to add the agent's temporary
+// OfferAgentIgnore asks, once per project, to add the agent's own
 // directory to an existing ignore file that doesn't exclude it. A yes adds
 // the line; a no is remembered in the state directory.
-func OfferTempIgnore(b Build, dir, state string, ask func(file, rel string) bool) error {
+func OfferAgentIgnore(b Build, dir, state string, ask func(file, rel string) bool) error {
 	rel, err := MissingIgnore(b, dir)
 	if err != nil || rel == "" {
 		return err

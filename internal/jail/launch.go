@@ -124,8 +124,8 @@ func Launch(o Options) (int, error) {
 		if err := EnsureHiddenIgnored(*img.Build, hidden, ask); err != nil {
 			return 0, err
 		}
-		if tmp := claudeTempDir(cfgDir); ask != nil && agentName(o, cfg) == "claude" && writableIn(cfg.Resolved, tmp) {
-			if err := OfferTempIgnore(*img.Build, tmp, state, askTempIgnore(os.Stdin, os.Stderr)); err != nil {
+		if name := agentName(o, cfg); ask != nil && (name == "claude" || name == "opencode") && writableIn(cfg.Resolved, agentDir(cfgDir, name)) {
+			if err := OfferAgentIgnore(*img.Build, agentDir(cfgDir, name), state, askAgentIgnore(os.Stdin, os.Stderr, name)); err != nil {
 				return 0, err
 			}
 		}

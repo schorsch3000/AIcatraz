@@ -30,10 +30,10 @@ func TestWritableIn(t *testing.T) {
 	}
 }
 
-func TestMakeTempDir(t *testing.T) {
+func TestMakeAgentDir(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".az", "claude")
-	if err := makeTempDir(dir); err != nil {
+	if err := makeAgentDir(root, dir); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(dir)
@@ -47,7 +47,7 @@ func TestMakeTempDir(t *testing.T) {
 	// Loose permissions are tightened, and an edited .gitignore is kept.
 	os.Chmod(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("mine\n"), 0o600)
-	if err := makeTempDir(dir); err != nil {
+	if err := makeAgentDir(root, dir); err != nil {
 		t.Fatal(err)
 	}
 	if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o700 {
@@ -62,10 +62,39 @@ func TestMakeTempDir(t *testing.T) {
 	os.Chmod(target, 0o755)
 	link := filepath.Join(root, "link")
 	os.Symlink(target, link)
-	if err := makeTempDir(link); err == nil {
+	if err := makeAgentDir(root, link); err == nil {
 		t.Error("a symlink was accepted")
 	}
 	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o755 {
 		t.Errorf("the link's target was changed: %v", fi.Mode())
+	}
+
+	// A symlink further up (.az itself) is refused too, before anything is created.
+	proj := t.TempDir()
+	os.Symlink(target, filepath.Join(proj, ".az"))
+	if err := makeAgentDir(proj, filepath.Join(proj, ".az", "claude")); err == nil {
+		t.Error("a symlinked .az was accepted")
+	}
+	if _, err := os.Lstat(filepath.Join(target, "claude")); err == nil {
+		t.Error("created a directory through the link")
+	}
+}
+
+func TestNoSymlinks(t *testing.T) {
+	proj := t.TempDir()
+	os.MkdirAll(filepath.Join(proj, ".az", "claude", "plugins"), 0o700)
+	if err := noSymlinks(proj, filepath.Join(proj, ".az", "claude", "plugins")); err != nil {
+		t.Error(err)
+	}
+	if err := noSymlinks(proj, filepath.Join(proj, ".az", "opencode", "plugins")); err != nil {
+		t.Errorf("missing parts are fine: %v", err)
+	}
+	os.RemoveAll(filepath.Join(proj, ".az", "claude", "plugins"))
+	os.Symlink("/etc", filepath.Join(proj, ".az", "claude", "plugins"))
+	if err := noSymlinks(proj, filepath.Join(proj, ".az", "claude", "plugins")); err == nil {
+		t.Error("a symlink was accepted")
+	}
+	if err := noSymlinks(proj, "/etc"); err == nil {
+		t.Error("a path outside the project was accepted")
 	}
 }

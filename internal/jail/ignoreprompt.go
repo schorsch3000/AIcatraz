@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/schorsch3000/aicatraz/internal/config"
 	"github.com/schorsch3000/aicatraz/internal/ui"
 )
 
@@ -57,7 +58,7 @@ func askMigrate(in io.Reader, out io.Writer) func(old, new string) string {
 	st := ui.For(out)
 	return func(old, new string) string {
 		fmt.Fprintf(out, "%s the build uses %s, but this project only has %s.\n", st.BoldYellow(ui.Prog+":"), st.Bold(filepath.Base(new)), st.Bold(old))
-		fmt.Fprintf(out, "  [r]ename it to %s, create a new %s (excluding only %s) and keep it, or [N]either? [r/c/N] ", st.Bold(filepath.Base(new)), st.Bold(filepath.Base(new)), claudeTempRel)
+		fmt.Fprintf(out, "  [r]ename it to %s, create a new %s (excluding only the agents' files in %s) and keep it, or [N]either? [r/c/N] ", st.Bold(filepath.Base(new)), st.Bold(filepath.Base(new)), config.AzDir+"/")
 		ans := strings.ToLower(readLine(in))
 		fmt.Fprintln(out)
 		switch ans {
@@ -70,13 +71,16 @@ func askMigrate(in io.Reader, out io.Writer) func(old, new string) string {
 	}
 }
 
-// askTempIgnore returns the question asked when an existing ignore file
-// doesn't exclude Claude Code's temporary directory. Only an explicit yes
-// counts.
-func askTempIgnore(in io.Reader, out io.Writer) func(file, rel string) bool {
+// askAgentIgnore returns the question asked when an existing ignore file
+// doesn't exclude an agent's own directory. Only an explicit yes counts.
+func askAgentIgnore(in io.Reader, out io.Writer, agent string) func(file, rel string) bool {
 	st := ui.For(out)
+	what := "its plugins"
+	if agent == "claude" {
+		what = "its plugins, temporary files and scratchpad"
+	}
 	return func(file, rel string) bool {
-		fmt.Fprintf(out, "%s Claude Code keeps its temporary files and scratchpad in %s, but %s does not exclude it.\n", st.BoldYellow(ui.Prog+":"), st.Bold(rel), filepath.Base(file))
+		fmt.Fprintf(out, "%s %s keeps %s in %s, but %s does not exclude it.\n", st.BoldYellow(ui.Prog+":"), agent, what, st.Bold(rel), filepath.Base(file))
 		fmt.Fprintf(out, "  Add %s to %s so it can't end up in the image? A no is remembered for this project. [y/N] ", st.Bold(rel), st.Bold(file))
 		ans := readLine(in)
 		fmt.Fprintln(out)

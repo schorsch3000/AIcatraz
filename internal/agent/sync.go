@@ -21,21 +21,138 @@ const (
 )
 
 // SyncRoot brings a root's entries from the host home into dest (the
-// per-project directory mounted as the root in the jail).
-func SyncRoot(hostHome string, r Root, dest string) error {
+// per-project directory mounted as the root in the jail). With inProject the
+// Project entries live in the project instead (see SeedProjectEntry): they
+// are left out, and only an empty directory is kept as their mount point,
+// and the Keep keys of the jail's files survive the copy.
+func SyncRoot(hostHome string, r Root, dest string, inProject bool) error {
 	if err := os.MkdirAll(dest, 0o700); err != nil {
 		return err
 	}
 	for _, e := range r.Entries {
-		hostRel := e.HostPath
-		if hostRel == "" {
-			hostRel = filepath.Join(r.Path, e.Name)
+		dst := filepath.Join(dest, e.Name)
+		if inProject && e.Project {
+			if err := os.MkdirAll(dst, 0o700); err != nil {
+				return fmt.Errorf("%s: %w", e.Name, err)
+			}
+			continue
 		}
-		if err := syncEntry(filepath.Join(hostHome, hostRel), filepath.Join(dest, e.Name), e); err != nil {
+		var kept map[string]json.RawMessage
+		if inProject && len(e.Keep) > 0 {
+			kept = readKeys(dst, e.Keep)
+		}
+		if err := syncEntry(hostPath(hostHome, r, e), dst, e); err != nil {
 			return fmt.Errorf("%s: %w", e.Name, err)
+		}
+		if len(kept) > 0 {
+			if err := applyKeys(dst, kept); err != nil {
+				return fmt.Errorf("%s: %w", e.Name, err)
+			}
 		}
 	}
 	return nil
+}
+
+func hostPath(hostHome string, r Root, e Entry) string {
+	if e.HostPath != "" {
+		return filepath.Join(hostHome, e.HostPath)
+	}
+	return filepath.Join(hostHome, r.Path, e.Name)
+}
+
+// SeedProjectEntry copies an entry from the host to dst, its place in the
+// project, unless dst exists already. The copy is made next to dst and renamed
+// into place, so a failed one is tried again next time.
+func SeedProjectEntry(hostHome string, r Root, e Entry, dst string) error {
+	if _, err := os.Lstat(dst); err == nil {
+		return nil
+	}
+	src := hostPath(hostHome, r, e)
+	if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
+		return os.Mkdir(dst, 0o700) // nothing on the host: the agent starts empty
+	}
+	tmp := dst + ".seeding"
+	if err := os.RemoveAll(tmp); err != nil {
+		return err
+	}
+	if err := syncEntry(src, tmp, Entry{Name: e.Name, Exclude: e.Exclude}); err != nil {
+		os.RemoveAll(tmp)
+		return fmt.Errorf("%s: %w", e.Name, err)
+	}
+	return os.Rename(tmp, dst)
+}
+
+// readKeys returns the given top-level keys of the JSON object in file; nil
+// if it is missing or not an object.
+func readKeys(file string, keys []string) map[string]json.RawMessage {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(data, &obj) != nil {
+		return nil
+	}
+	kept := map[string]json.RawMessage{}
+	for _, k := range keys {
+		if v, ok := obj[k]; ok {
+			kept[k] = v
+		}
+	}
+	return kept
+}
+
+// applyKeys puts kept keys into the JSON object in file (creating it if it
+// is missing). Objects are merged, kept entries winning; other values are
+// replaced. A file that isn't a JSON object is left as it is.
+func applyKeys(file string, kept map[string]json.RawMessage) error {
+	obj := map[string]json.RawMessage{}
+	mode := fs.FileMode(0o600)
+	if data, err := os.ReadFile(file); err == nil {
+		if json.Unmarshal(data, &obj) != nil || obj == nil {
+			return nil
+		}
+		if st, err := os.Stat(file); err == nil {
+			mode = st.Mode().Perm()
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	for k, v := range kept {
+		var mine, theirs map[string]json.RawMessage
+		if json.Unmarshal(v, &mine) == nil && mine != nil && json.Unmarshal(obj[k], &theirs) == nil && theirs != nil {
+			for mk, mv := range mine {
+				theirs[mk] = mv
+			}
+			merged, err := json.Marshal(theirs)
+			if err != nil {
+				return err
+			}
+			obj[k] = merged
+			continue
+		}
+		obj[k] = v
+	}
+	out, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(file), ".sync-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(out, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), file)
 }
 
 func syncEntry(src, dst string, e Entry) error {

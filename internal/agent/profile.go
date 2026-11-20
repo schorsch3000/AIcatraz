@@ -35,6 +35,15 @@ type Entry struct {
 	HostPath string
 	// Exclude lists base names that are not copied from a directory.
 	Exclude []string
+	// Project entries live in the project (.az/<agent>/<Name>) when the jail
+	// can write there: copied from the host once, then the agent's own, so
+	// what the agent installs (plugins) survives. Otherwise they are synced.
+	Project bool
+	// Keep lists top-level keys of a JSON file that the jail's copy keeps
+	// over the host's while the Project entries live in the project (the
+	// settings that enable what is installed there). Objects are merged, the
+	// jail's entries winning.
+	Keep []string
 }
 
 // Root is a directory the agent keeps its configuration and state in. The same
@@ -79,7 +88,7 @@ var profiles = map[string]*Profile{
 		Roots: []Root{{
 			Path: ".claude",
 			Entries: []Entry{
-				{Name: "settings.json"},
+				{Name: "settings.json", Keep: []string{"enabledPlugins", "extraKnownMarketplaces"}},
 				{Name: "CLAUDE.md"},
 				{Name: "keybindings.json"},
 				{Name: ".credentials.json"},
@@ -87,7 +96,7 @@ var profiles = map[string]*Profile{
 				{Name: "skills"},
 				{Name: "agents"},
 				{Name: "commands"},
-				{Name: "plugins"},
+				{Name: "plugins", Project: true},
 			},
 		}},
 		Install: Install{
@@ -111,7 +120,7 @@ var profiles = map[string]*Profile{
 				{Name: "AGENTS.md"},
 				{Name: "agents"},
 				{Name: "commands"},
-				{Name: "plugins"},
+				{Name: "plugins", Project: true},
 				{Name: "skills"},
 				{Name: "tool"},
 				{Name: "themes"},
@@ -135,6 +144,26 @@ var profiles = map[string]*Profile{
 			BinaryPath: ".opencode/bin/opencode",
 		},
 	},
+}
+
+// ProjectEntry is an entry that can live in the project, with its root.
+type ProjectEntry struct {
+	Root  Root
+	Entry Entry
+}
+
+// ProjectEntries lists the entries that live in the project when the jail
+// can write there.
+func (p *Profile) ProjectEntries() []ProjectEntry {
+	var pe []ProjectEntry
+	for _, r := range p.Roots {
+		for _, e := range r.Entries {
+			if e.Project {
+				pe = append(pe, ProjectEntry{r, e})
+			}
+		}
+	}
+	return pe
 }
 
 // Lookup returns the profile for an agent name.
