@@ -15,7 +15,7 @@ agent:
 - Both agents' own auto-update is switched off.
 
 **Configuration.** Your real home is never mounted. Each agent has a profile that says which configuration it gets. The agent's config directories exist at the same paths as on the host (`~/.claude`, `~/.config/opencode`, ...) but are backed by per-project directories in `~/.local/state/aicatraz/<project>/agents/`.
-- **Synced** entries are copied from your real config on every launch and overwrite what the jail has. A change you make carries over; anything the agent changed in them is discarded; a file you delete disappears from the jail. Files that haven't changed (size, mode, time) are not copied again.
+- **Synced** entries are copied from your real config on every launch and overwrite what the jail has. A change you make carries over; anything the agent changed in them is discarded; a file you delete disappears from the jail. Files that haven't changed are not copied again: same size, mode and time, and then the same content too, so an edit can't survive by setting the copy's time back.
 - **Seeded** entries are copied only if the jail doesn't have them yet.
 - Everything else in those directories is the agent's own state (history, transcripts, caches) and survives between launches, per project. Your host's transcripts and history are **not** copied in, and the agent's state never reaches your real files.
 

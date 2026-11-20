@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -246,12 +247,20 @@ func mirrorDir(src, dst string, exclude []string, budget *int64, depth int, chai
 	return nil
 }
 
-// mirrorFile copies src to dst unless dst already has the same size, mode and
-// modification time (copies keep the source's mtime, so this is exact enough).
+// mirrorFile copies src to dst unless dst is the same already. Size, mode and
+// modification time decide quickly when it isn't; when they match, the
+// contents are compared too, since the agent can write the jail's copy and set
+// its time (touch -d) to keep an edit.
 func mirrorFile(src, dst string, st fs.FileInfo, budget *int64) error {
 	if dstSt, err := os.Lstat(dst); err == nil && dstSt.Mode().IsRegular() &&
 		dstSt.Size() == st.Size() && dstSt.Mode().Perm() == st.Mode().Perm() && dstSt.ModTime().Equal(st.ModTime()) {
-		return nil
+		same, err := sameContent(src, dst)
+		if err != nil {
+			return err
+		}
+		if same {
+			return nil
+		}
 	} else if err == nil && dstSt.IsDir() {
 		if err := os.RemoveAll(dst); err != nil {
 			return err
@@ -287,6 +296,39 @@ func mirrorFile(src, dst string, st fs.FileInfo, budget *int64) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), dst)
+}
+
+// sameContent reports whether two files have the same bytes.
+func sameContent(a, b string) (bool, error) {
+	fa, err := os.Open(a)
+	if err != nil {
+		return false, err
+	}
+	defer fa.Close()
+	fb, err := os.Open(b)
+	if err != nil {
+		return false, nil // unreadable in the jail's copy: copy it again
+	}
+	defer fb.Close()
+	ba, bb := make([]byte, 64<<10), make([]byte, 64<<10)
+	for {
+		na, errA := io.ReadFull(fa, ba)
+		nb, errB := io.ReadFull(fb, bb)
+		if na != nb || !bytes.Equal(ba[:na], bb[:nb]) {
+			return false, nil
+		}
+		endA := errA == io.EOF || errA == io.ErrUnexpectedEOF
+		endB := errB == io.EOF || errB == io.ErrUnexpectedEOF
+		if errA != nil && !endA {
+			return false, errA
+		}
+		if errB != nil && !endB {
+			return false, nil
+		}
+		if endA || endB {
+			return endA && endB, nil
+		}
+	}
 }
 
 // TrustClaudeDir marks dir as trusted in the .claude.json inside the jail's

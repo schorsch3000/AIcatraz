@@ -192,6 +192,17 @@ func TestSyncKeepsPrivateModesAndSkipsUnchangedFiles(t *testing.T) {
 	if !os.SameFile(before, after) {
 		t.Error("an unchanged file must not be copied again")
 	}
+
+	// The agent edits the copy and puts size, mode and time back: still copied.
+	jail := filepath.Join(dest, ".credentials.json")
+	os.WriteFile(jail, []byte("SECRET"), 0o600)
+	os.Chtimes(jail, srcSt.ModTime(), srcSt.ModTime())
+	if err := SyncRoot(home, root, dest, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, jail); got != "secret" {
+		t.Errorf("an edit with the host's size and time survived: %q", got)
+	}
 }
 
 func TestSyncFollowsSymlinksAndSurvivesCycles(t *testing.T) {

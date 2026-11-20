@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A synced agent config file whose size, mode and modification time match the host's is now compared by content before it is skipped. Before, the agent could keep an edit to one (`settings.json`, `CLAUDE.md`, a skill) across launches by setting the file's time back with `touch -d`.
 - In `aicatraz up`, opening a waiting prompt with the info key and answering prompts no longer count as typing: a prompt opened with `Ctrl-Q` takes keys at once, and a prompt queued behind the one you just answered opens at once, without the guard, instead of waiting for `approval.idle`.
 - The agents keep their own files in the project, in `.az/claude/` and `.az/opencode/`, when the jail can write there. Each is created private (`0700`) with a `.gitignore` of its own; a symlink on the way is refused.
   - Plugins live in `.az/<agent>/plugins`: copied from your home once, then the agent's own, so plugins installed in the jail stay. Claude Code's `enabledPlugins` and `extraKnownMarketplaces` in the jail's `settings.json` are kept over the host's.
