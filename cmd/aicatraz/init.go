@@ -126,9 +126,9 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		ui.Note(stderr, "%s", dockerNote)
 	}
 
-	// An empty ignore file for the image build; an existing one is kept.
+	// An ignore file for the image build; an existing one is kept.
 	if _, err := os.Lstat(azPath(ignoreFileName)); err != nil {
-		if err := os.WriteFile(azPath(ignoreFileName), nil, 0o644); err != nil {
+		if err := os.WriteFile(azPath(ignoreFileName), []byte(jail.StarterIgnore), 0o644); err != nil {
 			ui.Error(stderr, "%v", err)
 			return 2
 		}

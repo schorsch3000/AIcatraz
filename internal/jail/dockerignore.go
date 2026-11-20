@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/schorsch3000/aicatraz/internal/config"
 )
 
 // Ignore is a parsed .dockerignore file.
@@ -77,6 +79,18 @@ func (p ignorePattern) matches(rel string) bool {
 	return false
 }
 
+// StarterIgnore is what a new ignore file gets: Claude Code's temporary files
+// (its scratchpad), which the launcher keeps in the project.
+const StarterIgnore = "# Claude Code's temporary files and scratchpad\n" + claudeTempRel + "\n"
+
+// claudeTempRel is Claude Code's temporary directory, relative to the project.
+const claudeTempRel = config.AzDir + "/claude"
+
+// claudeTempDir is Claude Code's temporary directory in a project.
+func claudeTempDir(projectDir string) string {
+	return filepath.Join(projectDir, filepath.FromSlash(claudeTempRel))
+}
+
 // IgnorePath is the ignore file of a build: <dockerfile>.dockerignore, which
 // BuildKit reads ahead of the context's .dockerignore.
 func IgnorePath(b Build) string { return b.Dockerfile + ".dockerignore" }
@@ -109,7 +123,7 @@ func MigrateIgnore(b Build, ask func(old, new string) string) error {
 	case "rename":
 		return os.Rename(old, dst)
 	case "create":
-		return os.WriteFile(dst, nil, 0o644)
+		return os.WriteFile(dst, []byte(StarterIgnore), 0o644)
 	}
 	return nil
 }
@@ -209,6 +223,76 @@ func AppendIgnore(file, rel string) error {
 		return err
 	}
 	return f.Close()
+}
+
+// MissingIgnore returns the line an existing ignore file of the build lacks
+// to exclude dir, relative to the build context, or "" when nothing is
+// missing: dir is outside the context, already excluded, or there is no
+// ignore file yet (a new one gets StarterIgnore).
+func MissingIgnore(b Build, dir string) (string, error) {
+	rel, err := filepath.Rel(b.Context, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", nil
+	}
+	rel = filepath.ToSlash(rel)
+	for _, f := range ignoreFilesFor(b) {
+		fh, err := os.Open(f)
+		if err != nil {
+			return "", err
+		}
+		ig, err := ParseIgnore(fh)
+		fh.Close()
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", f, err)
+		}
+		if !ig.Excluded(rel) {
+			return rel, nil
+		}
+	}
+	return "", nil
+}
+
+// declinedIgnore is the file in the state directory that remembers the lines
+// you didn't want in an ignore file, one "file<TAB>line" each, so the
+// question isn't asked on every start.
+const declinedIgnore = "ignore-declined"
+
+func ignoreDeclined(state, file, rel string) bool {
+	data, err := os.ReadFile(filepath.Join(state, declinedIgnore))
+	if err != nil {
+		return false
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if l == file+"\t"+rel {
+			return true
+		}
+	}
+	return false
+}
+
+func declineIgnore(state, file, rel string) error {
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		return err
+	}
+	return AppendIgnore(filepath.Join(state, declinedIgnore), file+"\t"+rel)
+}
+
+// OfferTempIgnore asks, once per project, to add the agent's temporary
+// directory to an existing ignore file that doesn't exclude it. A yes adds
+// the line; a no is remembered in the state directory.
+func OfferTempIgnore(b Build, dir, state string, ask func(file, rel string) bool) error {
+	rel, err := MissingIgnore(b, dir)
+	if err != nil || rel == "" {
+		return err
+	}
+	file := IgnorePath(b)
+	if ignoreDeclined(state, file, rel) {
+		return nil
+	}
+	if ask(file, rel) {
+		return AppendIgnore(file, rel)
+	}
+	return declineIgnore(state, file, rel)
 }
 
 // EnsureHiddenIgnored runs CheckHidden and, when ask is given, offers to fix

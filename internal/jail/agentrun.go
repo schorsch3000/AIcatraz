@@ -33,16 +33,23 @@ type agentRun struct {
 	state     string // the project's state directory
 	home      string
 	roots     map[string]string // root path -> its directory on the host
+	tempDir   string            // the agent's temporary directory in the project, if any
+}
+
+// agentName is the agent a run starts, "" for none.
+func agentName(o Options, cfg *config.Config) string {
+	if o.Agent == "@config" {
+		return cfg.Agent.Tool
+	}
+	return o.Agent
 }
 
 // planAgent works out how to start the agent. With dry set nothing is
 // installed or copied; the result is only good for --print.
-func planAgent(o Options, cfg *config.Config, home, state string, uid, gid int, dry bool) (*agentRun, error) {
-	name := o.Agent
-	if name == "@config" {
-		if name = cfg.Agent.Tool; name == "" {
-			return nil, fmt.Errorf("no agent configured: set agent.tool in the config, or start one with `aicatraz claude` or `aicatraz opencode`")
-		}
+func planAgent(o Options, cfg *config.Config, projectDir, home, state string, uid, gid int, dry bool) (*agentRun, error) {
+	name := agentName(o, cfg)
+	if name == "" {
+		return nil, fmt.Errorf("no agent configured: set agent.tool in the config, or start one with `aicatraz claude` or `aicatraz opencode`")
 	}
 	prof, err := agent.Lookup(name)
 	if err != nil {
@@ -89,6 +96,13 @@ func planAgent(o Options, cfg *config.Config, home, state string, uid, gid int, 
 		a.sessionID = agent.NewSessionID()
 		lo.SessionID = a.sessionID
 	}
+	if prof.Name == "claude" {
+		// The jail's /tmp is removed with the session, and Claude's scratchpad
+		// with it. In the project it survives, if the jail can write there.
+		if dir := claudeTempDir(projectDir); writableIn(cfg.Resolved, dir) {
+			lo.TempDir, a.tempDir = dir, dir
+		}
+	}
 	argv, env := prof.Command(home, lo)
 	a.command = argv
 
@@ -108,6 +122,33 @@ func planAgent(o Options, cfg *config.Config, home, state string, uid, gid int, 
 		a.extraArgs = append(a.extraArgs, "-e", k+"="+env[k])
 	}
 	return a, nil
+}
+
+// makeTempDir creates an agent's temporary directory in the project, private
+// to the user (Claude Code insists on 0700), with a .gitignore that keeps it
+// out of git. The agent can write to the project, so a symlink in its place is
+// refused rather than followed.
+func makeTempDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	switch {
+	case os.IsNotExist(err):
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	case !fi.IsDir():
+		return fmt.Errorf("it exists and is not a directory")
+	case fi.Mode().Perm() != 0o700:
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	ignore := filepath.Join(dir, ".gitignore")
+	if _, err := os.Lstat(ignore); os.IsNotExist(err) {
+		return os.WriteFile(ignore, []byte("*\n"), 0o600)
+	}
+	return nil
 }
 
 func isNotInstalled(err error) bool {
@@ -138,6 +179,11 @@ func (a *agentRun) prepare(image, cwd string) error {
 	for _, r := range a.profile.Roots {
 		if err := agent.SyncRoot(a.home, r, a.roots[r.Path]); err != nil {
 			return fmt.Errorf("copying your %s configuration (%s): %w", a.profile.Name, r.Path, err)
+		}
+	}
+	if a.tempDir != "" {
+		if err := makeTempDir(a.tempDir); err != nil {
+			return fmt.Errorf("creating %s for %s's temporary files: %w", a.tempDir, a.profile.Name, err)
 		}
 	}
 	if a.profile.Name == "claude" {

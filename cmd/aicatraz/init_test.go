@@ -50,6 +50,9 @@ func TestInitWritesAValidConfig(t *testing.T) {
 	if errb.Len() != 0 {
 		t.Errorf("a fresh starter config must have no findings: %s", errb.String())
 	}
+	if b, err := os.ReadFile(filepath.Join(dir, ".az", "Dockerfile.az.dockerignore")); err != nil || !strings.Contains(string(b), "\n.az/claude\n") {
+		t.Errorf("the ignore file keeps Claude's temporary files out of the build: %q %v", b, err)
+	}
 	if !strings.Contains(out.String(), "aicatraz config check") {
 		t.Errorf("next steps missing: %s", out.String())
 	}

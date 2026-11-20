@@ -105,7 +105,7 @@ func TestMigrateIgnore(t *testing.T) {
 		t.Error("declined must change nothing")
 	}
 	MigrateIgnore(b, ask("create"))
-	if got, err := os.ReadFile(az); err != nil || len(got) != 0 {
+	if got, err := os.ReadFile(az); err != nil || string(got) != StarterIgnore {
 		t.Errorf("create: %q %v", got, err)
 	}
 	if _, err := os.Stat(old); err != nil {
@@ -199,5 +199,71 @@ func TestAskMigrateAnswers(t *testing.T) {
 	askMigrate(r, io.Discard)("/p/.dockerignore", "/p/Dockerfile.az.dockerignore")
 	if r.Len() != len("rest") {
 		t.Errorf("read past the answer: %d bytes left", r.Len())
+	}
+}
+
+func TestOfferTempIgnore(t *testing.T) {
+	proj, state := t.TempDir(), filepath.Join(t.TempDir(), "state")
+	os.MkdirAll(filepath.Join(proj, ".az"), 0o755)
+	b := Build{Context: proj, Dockerfile: filepath.Join(proj, ".az", "Dockerfile.az")}
+	ignore := IgnorePath(b)
+	tmp := claudeTempDir(proj)
+	asked := 0
+	ask := func(answer bool) func(string, string) bool {
+		return func(file, rel string) bool {
+			if file != ignore || rel != ".az/claude" {
+				t.Errorf("asked about %s in %s", rel, file)
+			}
+			asked++
+			return answer
+		}
+	}
+
+	// No ignore file: nothing to add to (a new one gets the line anyway).
+	if err := OfferTempIgnore(b, tmp, state, ask(true)); err != nil || asked != 0 {
+		t.Fatalf("err=%v asked=%d", err, asked)
+	}
+	// Already excluded, also by a parent: not asked.
+	os.WriteFile(ignore, []byte(".az\n"), 0o644)
+	if err := OfferTempIgnore(b, tmp, state, ask(true)); err != nil || asked != 0 {
+		t.Fatalf("err=%v asked=%d", err, asked)
+	}
+	// Outside the build context: not asked.
+	sub := Build{Context: filepath.Join(proj, "src"), Dockerfile: b.Dockerfile}
+	os.WriteFile(ignore, []byte("node_modules\n"), 0o644)
+	if err := OfferTempIgnore(sub, tmp, state, ask(true)); err != nil || asked != 0 {
+		t.Fatalf("err=%v asked=%d", err, asked)
+	}
+
+	// A no changes nothing and is remembered.
+	if err := OfferTempIgnore(b, tmp, state, ask(false)); err != nil || asked != 1 {
+		t.Fatalf("err=%v asked=%d", err, asked)
+	}
+	if got, _ := os.ReadFile(ignore); string(got) != "node_modules\n" {
+		t.Errorf("a no changed the file: %q", got)
+	}
+	if err := OfferTempIgnore(b, tmp, state, ask(true)); err != nil || asked != 1 {
+		t.Fatalf("a no must not be asked again: err=%v asked=%d", err, asked)
+	}
+
+	// Without that memory, a yes appends the line.
+	os.RemoveAll(state)
+	if err := OfferTempIgnore(b, tmp, state, ask(true)); err != nil || asked != 2 {
+		t.Fatalf("err=%v asked=%d", err, asked)
+	}
+	if got, _ := os.ReadFile(ignore); string(got) != "node_modules\n.az/claude\n" {
+		t.Errorf("Dockerfile.az.dockerignore = %q", got)
+	}
+}
+
+func TestAskTempIgnoreOnlyAYesCounts(t *testing.T) {
+	for in, want := range map[string]bool{"y\n": true, "Yes\n": true, "\n": false, "n\n": false, "": false} {
+		var out bytes.Buffer
+		if got := askTempIgnore(strings.NewReader(in), &out)("/p/.az/Dockerfile.az.dockerignore", ".az/claude"); got != want {
+			t.Errorf("input %q: got %v", in, got)
+		}
+		if !strings.Contains(out.String(), ".az/claude") {
+			t.Errorf("the question names the path: %s", out.String())
+		}
 	}
 }

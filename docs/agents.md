@@ -26,6 +26,7 @@ agent:
 
 - Claude Code is told where to look with `CLAUDE_CONFIG_DIR`, which also keeps `~/.claude.json` inside the mounted directory (a single file can't be bind-mounted safely because the agent rewrites it by renaming).
 - Claude Code gets `COLORTERM=truecolor`, so it draws in full color (the jail only passes `TERM` on from the host).
+- Claude Code gets `CLAUDE_CODE_TMPDIR=<project>/.az/claude`, so its temporary files and its scratchpad survive the session (the jail's `/tmp` is removed when it ends). The launcher creates the directory private (`0700`), with a `.gitignore` that ignores everything in it, and refuses a symlink in its place. If the jail can't write there (the project isn't mounted `rw`), Claude keeps using `/tmp`. Claude puts each session's scratchpad in a directory of its own under it (`claude-<uid>/<project>/<session>/scratchpad`), so `aicatraz resume` gets the old one back and a new session starts empty.
 - opencode's database can be many gigabytes (11 GB on the machine this was built on), so it is never copied: the jail starts with an empty one per project.
 - Symlinks in your config are followed (a symlinked skills directory is copied as what it points to) and nothing in the copy is a symlink. A single entry may copy at most 256 MB.
 - Credentials are copied like any other synced file, so everything in the jail can read them. Settings that call host paths or commands (hooks, MCP servers) run inside the container or fail there.

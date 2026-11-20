@@ -124,6 +124,11 @@ func Launch(o Options) (int, error) {
 		if err := EnsureHiddenIgnored(*img.Build, hidden, ask); err != nil {
 			return 0, err
 		}
+		if tmp := claudeTempDir(cfgDir); ask != nil && agentName(o, cfg) == "claude" && writableIn(cfg.Resolved, tmp) {
+			if err := OfferTempIgnore(*img.Build, tmp, state, askTempIgnore(os.Stdin, os.Stderr)); err != nil {
+				return 0, err
+			}
+		}
 	}
 
 	self, err := os.Executable()
@@ -173,7 +178,7 @@ func Launch(o Options) (int, error) {
 	}
 	var ag *agentRun
 	if o.Agent != "" {
-		if ag, err = planAgent(o, cfg, home, state, uid, gid, o.Print); err != nil {
+		if ag, err = planAgent(o, cfg, cfgDir, home, state, uid, gid, o.Print); err != nil {
 			return 0, err
 		}
 		ag.apply(&in)

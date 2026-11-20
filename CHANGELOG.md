@@ -3,6 +3,7 @@
 ## Unreleased
 
 - In `aicatraz up`, opening a waiting prompt with the info key and answering prompts no longer count as typing: a prompt opened with `Ctrl-Q` takes keys at once, and a prompt queued behind the one you just answered opens at once, without the guard, instead of waiting for `approval.idle`.
+- Claude Code keeps its temporary files, its scratchpad among them, in `.az/claude/` in the project (`CLAUDE_CODE_TMPDIR`) instead of the jail's `/tmp`, which is removed with every session. The directory is created private (`0700`) with a `.gitignore` of its own, and only when the jail can write there. `init` excludes it from the image build in the new `Dockerfile.az.dockerignore`, and so does the one created from a `.dockerignore`. For an existing `Dockerfile.az.dockerignore` without the line, `aicatraz claude` asks once in a terminal whether to add it; a no is remembered for the project.
 
 ## 0.14.0 (2026-10-24)
 

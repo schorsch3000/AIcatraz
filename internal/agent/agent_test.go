@@ -47,6 +47,13 @@ func TestClaudeCommand(t *testing.T) {
 	if env["CLAUDE_CONFIG_DIR"] != "/home/u/.claude" || env["DISABLE_AUTOUPDATER"] != "1" || env["COLORTERM"] != "truecolor" {
 		t.Errorf("env %v", env)
 	}
+	if _, ok := env["CLAUDE_CODE_TMPDIR"]; ok {
+		t.Error("no temporary directory unless one is given")
+	}
+	_, env = p.Command("/home/u", LaunchOptions{TempDir: "/p/.az/claude"})
+	if env["CLAUDE_CODE_TMPDIR"] != "/p/.az/claude" {
+		t.Errorf("temporary directory: %v", env)
+	}
 	argv, _ = p.Command("/home/u", LaunchOptions{Resume: "r-1", SessionID: "ignored"})
 	if !slices.Equal(argv, []string{"claude", "--resume", "r-1"}) {
 		t.Errorf("resume wins over a new session id, and skip is off: %v", argv)

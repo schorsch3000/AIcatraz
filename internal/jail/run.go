@@ -283,6 +283,18 @@ func PickCwd(vols []config.Volume, cwd, home string) string {
 	return home
 }
 
+// writableIn reports whether p can be written in the jail: the deepest volume
+// holding it is rw.
+func writableIn(vols []config.Volume, p string) bool {
+	best := -1
+	for i, v := range vols {
+		if (p == v.Path || inside(v.Path, p)) && (best < 0 || len(v.Path) > len(vols[best].Path)) {
+			best = i
+		}
+	}
+	return best >= 0 && vols[best].Mode == config.ModeRW
+}
+
 func inside(parent, child string) bool {
 	return strings.HasPrefix(child, strings.TrimSuffix(parent, "/")+"/")
 }
