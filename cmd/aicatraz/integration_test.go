@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/schorsch3000/aicatraz/internal/jail"
 )
 
 // These tests start real containers (debian:stable-slim and alpine:3 are
@@ -1963,7 +1965,7 @@ func TestIgnoreFallbackAsksInATerminal(t *testing.T) {
 		wantOld, wantAz string // "" means the file must not exist
 	}{
 		{"rename", "r\n", "", "node_modules\n"},
-		{"create", "c\n", "node_modules\n", "-empty-"},
+		{"create", "c\n", "node_modules\n", jail.StarterIgnore},
 		{"neither", "\n", "node_modules\n", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
